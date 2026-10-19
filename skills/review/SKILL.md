@@ -1,6 +1,6 @@
 ---
 name: review
-description: Revisão adversarial: um revisor por modelo ataca a mudança e o líder sintetiza o veredito em JSON.
+description: "Revisão adversarial: um revisor por modelo ataca a mudança e o líder sintetiza o veredito em JSON."
 source: https://github.com/backnotprop/pstack
 source_skill: interrogate
 license: MIT

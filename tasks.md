@@ -55,9 +55,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/skills.ts` (novo), `test/skills.test.ts` (novo)
 - **O que fazer**: Ler o `SKILL.md` da etapa em `skills/`, tirar o frontmatter e devolver o corpo (4.12). Recusar carregar uma skill com `adapted: false`.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para frontmatter removido, etapa inexistente e `adapted: false` recusada
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para frontmatter removido, etapa inexistente e `adapted: false` recusada
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T3
 
 ## T7: Configuração `.workflow.yml`
