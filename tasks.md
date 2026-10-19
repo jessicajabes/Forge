@@ -45,10 +45,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/artifacts.ts` (novo), `test/artifacts.test.ts` (novo)
 - **O que fazer**: Validar `spec.md` (seções fixas) e `tasks.md` (campos fixos, `Depende de` só para números menores, seção opcional `## Dúvidas`). Estrutura quebrada devolve erro claro, para o Forge pedir de novo (4.1). Gravação atômica: o arquivo nunca fica meio escrito.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para `spec.md` e `tasks.md` válidos, estrutura quebrada e dependência para tarefa de número maior
-  - [ ] Teste prova que a gravação atômica não deixa arquivo parcial
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para `spec.md` e `tasks.md` válidos, estrutura quebrada e dependência para tarefa de número maior
+  - [x] Teste prova que a gravação atômica não deixa arquivo parcial
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T3
 
 ## T6: Carregador de skills
