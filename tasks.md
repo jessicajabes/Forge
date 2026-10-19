@@ -171,9 +171,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `skills/dev/SKILL.md`
 - **O que fazer**: Adaptar a skill `dev` ao fluxo do Forge e trocar para `adapted: true`: ler `tasks.md`, `spec.md`, `context.md` e `lessons.md`, implementar só o lote atual, marcar as caixas `[x]`, usar só os comandos de `dev.allowed_commands` e não dar `git push` (4.6). Corpo em inglês, sem material de empregador.
 - **Critério de aceite**:
-  - [ ] `skills/dev/SKILL.md` tem `adapted: true`, `source`, `source_skill` e `license: MIT`
-  - [ ] O corpo não cita `/build`, `tasks/todo.md` nem modo de plano
-  - [ ] `src/skills.ts` carrega a skill sem recusar (teste da T6)
+  - [x] `skills/dev/SKILL.md` tem `adapted: true`, `source`, `source_skill` e `license: MIT`
+  - [x] O corpo não cita `/build`, `tasks/todo.md` nem modo de plano
+  - [x] `src/skills.ts` carrega a skill sem recusar (teste da T6)
 - **Depende de**: T6
 
 ## T19: Etapa Dev simples com branch e commit por lote
