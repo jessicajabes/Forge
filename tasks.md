@@ -84,9 +84,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/orchestrator.ts` (novo), `src/steps/stub.ts` (novo), `test/orchestrator.test.ts` (novo)
 - **O que fazer**: Rodar as seis etapas na ordem da seção 1 com o `Runner` falso e etapas de mentira, gravando os artefatos na pasta da execução. Ainda sem parada humana, arena, revisão com ciclos nem Lições reais.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que mostra a ordem Grill, Reconhecimento, Tarefas, Dev, Revisão, Lições e os arquivos gravados na pasta da execução
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que mostra a ordem Grill, Reconhecimento, Tarefas, Dev, Revisão, Lições e os arquivos gravados na pasta da execução
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T4, T5, T8
 
 ## T10: Parada humana e estimativa de custo
