@@ -36,9 +36,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/runner.ts` (novo), `test/fakeRunner.ts` (novo), `test/runner.test.ts` (novo)
 - **O que fazer**: Definir o tipo `Runner` como na 4.2 (`prompt`, `files`, `canEdit`, devolvendo texto). Criar um `Runner` falso que devolve respostas prontas em ordem e registra as chamadas, para os testes do orquestrador.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste novo que mostra o falso devolvendo as respostas na ordem e registrando `canEdit`
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste novo que mostra o falso devolvendo as respostas na ordem e registrando `canEdit`
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T3
 
 ## T5: Schemas e validação dos artefatos
