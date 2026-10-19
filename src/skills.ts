@@ -71,3 +71,26 @@ export async function loadSkill(
   }
   return { stage, meta, body };
 }
+
+/**
+ * Reads a prompt template from `skills/<stage>/references/<name>.md`. The templates
+ * start with a title and a note for maintainers, then a `---` line; only what comes
+ * after that line is the prompt (DESIGN 4.13).
+ */
+export async function loadReference(
+  stage: Stage,
+  name: string,
+  skillsDir: string = DEFAULT_SKILLS_DIR,
+): Promise<string> {
+  const path = join(skillsDir, stage, 'references', `${name}.md`);
+  let text: string;
+  try {
+    text = await readFile(path, 'utf-8');
+  } catch {
+    throw new SkillError(
+      `template "${name}" da etapa "${stage}" não encontrado em ${path}`,
+    );
+  }
+  const marker = text.indexOf('\n---\n');
+  return (marker === -1 ? text : text.slice(marker + 5)).trim();
+}

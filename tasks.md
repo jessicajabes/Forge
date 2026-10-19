@@ -133,9 +133,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/recon.ts` (novo), `test/recon.test.ts` (novo)
 - **O que fazer**: Gerar `context.md` na pasta da execução com a skill `recon`: um explicador em repo pequeno, três exploradores mais explicador em repo maior (4.9, 4.13). A execução `trivial` copia o último `context.md` e avisa a idade; sem anterior, gera um novo. `--refresh-context` força refazer.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para repo pequeno (1 chamada), repo grande (3 exploradores e 1 explicador) e `trivial` com e sem `context.md` anterior
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para repo pequeno (1 chamada), repo grande (3 exploradores e 1 explicador) e `trivial` com e sem `context.md` anterior
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T6, T9, T13
 
 ## T15: Etapa Grill
