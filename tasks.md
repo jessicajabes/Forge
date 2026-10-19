@@ -161,10 +161,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/tasks.ts` (novo), `test/tasks.test.ts` (novo)
 - **O que fazer**: Gerar `tasks.md` com a skill `tasks`, validar com os schemas e pedir de novo se vier malformado. Na `trivial`, uma chamada de leitura gera antes o `spec.md` mínimo, tudo `(provisória)` (3.2). Passar `lessons.md` à etapa quando existir.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para `tasks.md` válido, malformado pedido de novo e `trivial` gerando spec provisório
-  - [ ] Teste confirma que `lessons.md` entra no prompt só quando existe
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para `tasks.md` válido, malformado pedido de novo e `trivial` gerando spec provisório
+  - [x] Teste confirma que `lessons.md` entra no prompt só quando existe
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T5, T6, T9, T14
 
 ## T18: Adaptar a skill `dev`
