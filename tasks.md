@@ -93,10 +93,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/humanStop.ts` (novo), `src/costEstimate.ts` (novo), `test/humanStop.test.ts` (novo)
 - **O que fazer**: Depois das Tarefas, mostrar o `tasks.md` (e `## Dúvidas`, se houver), uma linha de custo relativa (chamadas de Dev por lote e nº de lotes) e as opções `aprovar`, `editar`, `cancelar` e `rodar sem arena` (4.10). O Dev só começa depois de `aprovar`.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com um teste para cada opção, incluindo que `cancelar` não chama o Dev e `rodar sem arena` desliga o arena
-  - [ ] Teste prova que a linha de custo muda com `review_mode: per_task`
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com um teste para cada opção, incluindo que `cancelar` não chama o Dev e `rodar sem arena` desliga o arena
+  - [x] Teste prova que a linha de custo muda com `review_mode: per_task`
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T9
 
 ## T11: Retomada da última execução
