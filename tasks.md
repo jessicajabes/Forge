@@ -24,12 +24,12 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `package.json` (novo), `tsconfig.json` (novo), `eslint.config.js` (novo), `.prettierrc` (novo), `.gitignore` (novo)
 - **O que fazer**: Criar o pacote TypeScript do Forge, com nome `@jessicajabes/forge`, com `vitest`, `eslint` (regras recomendadas do `typescript-eslint`) e `prettier`. Scripts `test`, `typecheck` (`tsc --noEmit`) e `lint` (`eslint` e `prettier --check`). `.gitignore` com `.env`, `node_modules` e `dist`, e um teste de fumaça em `test/smoke.test.ts`. O `LICENSE` já existe.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com o teste de fumaça
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
-  - [ ] `.env` está no `.gitignore`
-  - [ ] O `package.json` tem `name` igual a `@jessicajabes/forge`
-  - [ ] `npm run lint` falha num arquivo mal formatado e passa depois de `prettier --write`
+  - [x] `npm test` passa, com o teste de fumaça
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
+  - [x] `.env` está no `.gitignore`
+  - [x] O `package.json` tem `name` igual a `@jessicajabes/forge`
+  - [x] `npm run lint` falha num arquivo mal formatado e passa depois de `prettier --write`
 - **Depende de**: nenhuma
 
 ## T4: Tipo `Runner` e `Runner` falso
