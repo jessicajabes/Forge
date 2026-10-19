@@ -64,10 +64,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/config.ts` (novo), `.workflow.example.yml` (novo), `test/config.test.ts` (novo)
 - **O que fazer**: Carregar e validar o `.workflow.yml` com os padrões da 4.4 (`review_mode`, `max_review_cycles`, `max_lessons`, `max_context_tokens`, `subagents`, `dev.arena`, `claude.isolated`). Criar o exemplo com um modelo sugerido por etapa.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para arquivo ausente (usa padrões), campo inválido e `claude.isolated` padrão `true`
-  - [ ] O `.workflow.example.yml` é aceito pelo validador em um teste
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para arquivo ausente (usa padrões), campo inválido e `claude.isolated` padrão `true`
+  - [x] O `.workflow.example.yml` é aceito pelo validador em um teste
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T3
 
 ## T8: Pré-requisitos de execução

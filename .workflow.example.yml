@@ -1,0 +1,29 @@
+# Copy to .workflow.yml in the target repo. Every field is optional.
+# Models are placeholders: pick the ones available to your logins.
+steps:
+  grill: { runner: claude-cli, model: <strong model> } # strong: it decides what gets built
+  recon: { runner: claude-cli, model: <cheap model> }
+  tasks: { runner: claude-cli, model: <cheap model> }
+  dev: { runner: claude-cli } # or copilot-cli
+  review:
+    runner: claude-cli
+    model: <strong model> # synthesis of the verdict
+    reviewers: # one per model; runners can be mixed
+      - { runner: claude-cli, model: <model A> }
+      - { runner: copilot-cli, model: <model B> }
+review_mode: final # final | per_task
+max_review_cycles: 3
+max_lessons: 30
+max_context_tokens: # per conversation; initial values are estimates
+  warn: 80000
+  limit: 100000
+subagents:
+  max_parallel: 3
+dev:
+  allowed_commands: [npm test, npm run lint, npx prettier]
+  arena:
+    candidates: 3 # 1 turns the arena off
+    # models: [<model A>, <model B>, <model C>]            # optional: one model per candidate
+    # judge: { runner: copilot-cli, model: <model> }       # preferably another family than the Dev
+claude:
+  isolated: true # only the target repo's CLAUDE.md (see DESIGN 4.3)
