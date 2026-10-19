@@ -1,4 +1,5 @@
 import type { Config } from './config.js';
+import { readState, writeState } from './state.js';
 import type { Run } from './runs.js';
 import type { Runner } from './runner.js';
 
@@ -40,7 +41,7 @@ export class RunCancelled extends Error {
 
 export type RunResult = {
   status: 'completed' | 'cancelled';
-  /** Stages that ran to the end, in order. */
+  /** Stages that ran to the end during this call, in order. */
   stagesRun: StageName[];
 };
 
@@ -48,22 +49,44 @@ export type RunResult = {
  * Runs the pipeline in order. A trivial task skips the Grill: its minimal spec is
  * written by the Tasks stage (DESIGN 3.2). Each stage reads the previous artifacts
  * from the run folder, never the conversation (4.1).
+ *
+ * Progress is saved in the run folder after every stage. Calling it again on the same
+ * run folder resumes: stages that already completed are not repeated (3.3).
  */
 export async function runWorkflow(
   ctx: RunContext,
   stages: Stages,
 ): Promise<RunResult> {
+  const previous = await readState(ctx.run.dir);
+  const completed = new Set(
+    previous?.status === 'running' ? previous.completed : [],
+  );
   const stagesRun: StageName[] = [];
+  const save = (status: 'running' | 'completed' | 'cancelled') =>
+    writeState(ctx.run.dir, {
+      task: ctx.task,
+      size: ctx.size,
+      completed: [...completed],
+      status,
+    });
+
+  await save('running');
   for (const name of PIPELINE) {
     if (name === 'grill' && ctx.size === 'trivial') continue;
+    if (completed.has(name)) continue;
     try {
       await stages[name](ctx);
     } catch (error) {
-      if (error instanceof RunCancelled)
+      if (error instanceof RunCancelled) {
+        await save('cancelled');
         return { status: 'cancelled', stagesRun };
+      }
       throw error;
     }
+    completed.add(name);
     stagesRun.push(name);
+    await save('running');
   }
+  await save('completed');
   return { status: 'completed', stagesRun };
 }

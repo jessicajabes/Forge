@@ -103,10 +103,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/runs.ts`, `src/orchestrator.ts`, `test/resume.test.ts` (novo)
 - **O que fazer**: `forge-jj` sem argumento retoma a última execução incompleta a partir dos artefatos já gravados, sem refazer etapas concluídas (4.1, 3.3).
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que interrompe após as Tarefas e retoma sem repetir Grill nem Reconhecimento
-  - [ ] Sem execução incompleta, o Forge diz isso em uma linha
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que interrompe após as Tarefas e retoma sem repetir Grill nem Reconhecimento
+  - [x] Sem execução incompleta, o Forge diz isso em uma linha
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T10
 
 ## T12: Runner `claude-cli`
