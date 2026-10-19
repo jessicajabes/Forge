@@ -11,7 +11,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . && prettier --check ."
+    "lint": "eslint . && prettier --check .",
+    "test:manual": "vitest run --config vitest.manual.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

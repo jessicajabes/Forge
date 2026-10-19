@@ -113,11 +113,11 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/runners/claude-cli.ts` (novo), `test/runners/claude-cli.test.ts` (novo)
 - **O que fazer**: Rodar `claude -p` como subprocesso, no `cwd` do alvo, com `--output-format stream-json`, `--allowedTools`, `--max-turns` e as flags de isolamento validadas na T1 (4.3). Etapas somente leitura liberam só `Read`, `Grep` e `Glob`. Avisar qual credencial vale se `ANTHROPIC_API_KEY` estiver definida (4.5). Os testes cobrem a montagem dos argumentos, sem chamar o CLI.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que confirma que `canEdit: false` nunca inclui `Edit`, `Write` nem `Bash`
-  - [ ] Teste confirma as flags de isolamento e o aviso de `ANTHROPIC_API_KEY`
-  - [ ] Um teste manual com o `claude` instalado devolve texto em modo somente leitura
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que confirma que `canEdit: false` nunca inclui `Edit`, `Write` nem `Bash`
+  - [x] Teste confirma as flags de isolamento e o aviso de `ANTHROPIC_API_KEY`
+  - [x] Um teste manual com o `claude` instalado devolve texto em modo somente leitura
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T1, T4
 
 ## T13: Disparo de subagentes

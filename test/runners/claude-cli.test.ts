@@ -1,0 +1,139 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import type { ChildProcess } from 'node:child_process';
+import { describe, expect, it } from 'vitest';
+import {
+  ClaudeCliError,
+  buildInvocation,
+  createClaudeCliRunner,
+  parseStream,
+} from '../../src/runners/claude-cli.js';
+
+const read = { prompt: 'p', files: [], canEdit: false };
+const edit = { prompt: 'p', files: [], canEdit: true };
+const opts = { cwd: '/tmp/x', allowedCommands: ['npm test', 'npx prettier'] };
+
+function toolsOf(args: string[]): string[] {
+  return (args[args.indexOf('--tools') + 1] ?? '').split(',');
+}
+
+describe('buildInvocation', () => {
+  it('read-only never offers Edit, Write or Bash', () => {
+    const { args } = buildInvocation(read, opts, {});
+    expect(toolsOf(args)).toEqual(['Read', 'Grep', 'Glob']);
+    expect(args.join(' ')).not.toMatch(/Edit|Write|Bash|acceptEdits/);
+  });
+
+  it('editing allows only the listed shell commands and never bypasses permissions', () => {
+    const { args } = buildInvocation(edit, opts, {});
+    expect(toolsOf(args)).toContain('Edit');
+    expect(args).toContain('Bash(npm test:*)');
+    expect(args).toContain('Bash(npx prettier:*)');
+    expect(args).not.toContain('Bash');
+    expect(args.join(' ')).not.toMatch(/bypassPermissions|dangerously/);
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
+  });
+
+  it('is isolated by default: project settings only, no MCP, no skills, no auto memory', () => {
+    const { args, env } = buildInvocation(read, opts, {});
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('project');
+    expect(args).toContain('--strict-mcp-config');
+    expect(args).toContain('--disable-slash-commands');
+    expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBe('1');
+  });
+
+  it('drops the isolation flags when isolated is false', () => {
+    const { args, env } = buildInvocation(
+      read,
+      { ...opts, isolated: false },
+      {},
+    );
+    expect(args).not.toContain('--setting-sources');
+    expect(args).not.toContain('--strict-mcp-config');
+    expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBeUndefined();
+  });
+
+  it('passes the model and lists the files in the prompt', () => {
+    const inv = buildInvocation(
+      { ...read, files: ['a.ts'] },
+      { ...opts, model: 'm1' },
+      {},
+    );
+    expect(inv.args[inv.args.indexOf('--model') + 1]).toBe('m1');
+    expect(inv.stdin).toContain('- a.ts');
+    expect(inv.stdin.endsWith('p')).toBe(true);
+  });
+});
+
+describe('parseStream', () => {
+  const ok = [
+    '{"type":"system","subtype":"init"}',
+    '{"type":"assistant","message":{}}',
+    '{"type":"result","subtype":"success","is_error":false,"result":"texto final"}',
+  ].join('\n');
+
+  it('returns the text of the final result event', () => {
+    expect(parseStream(ok)).toBe('texto final');
+  });
+
+  it('fails on an error result and on a missing result', () => {
+    expect(() =>
+      parseStream(
+        '{"type":"result","subtype":"error_max_turns","is_error":true}',
+      ),
+    ).toThrow(ClaudeCliError);
+    expect(() => parseStream('{"type":"system"}')).toThrow(/não devolveu/);
+  });
+});
+
+describe('createClaudeCliRunner', () => {
+  function fakeChild(output: string, code = 0): ChildProcess {
+    const child = new EventEmitter() as ChildProcess;
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    Object.assign(child, { stdout, stderr: new PassThrough(), stdin });
+    stdin.on('finish', () => {
+      stdout.end(output);
+      setImmediate(() => child.emit('close', code));
+    });
+    return child;
+  }
+
+  it('runs claude through spawnFn and returns the result', async () => {
+    const seen: { cmd: string; cwd: string }[] = [];
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: (cmd, _args, o) => {
+        seen.push({ cmd, cwd: o.cwd });
+        return fakeChild(
+          '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+        );
+      },
+    });
+    expect(await runner(read)).toBe('oi');
+    expect(seen).toEqual([{ cmd: 'claude', cwd: '/repo' }]);
+  });
+
+  it('rejects when the process fails', async () => {
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: () => fakeChild('', 1),
+    });
+    await expect(runner(read)).rejects.toThrow(ClaudeCliError);
+  });
+
+  it('warns when ANTHROPIC_API_KEY would replace the login', () => {
+    const previous = process.env['ANTHROPIC_API_KEY'];
+    process.env['ANTHROPIC_API_KEY'] = 'chave-de-teste';
+    const messages: string[] = [];
+    try {
+      createClaudeCliRunner({ cwd: '/repo', notice: (m) => messages.push(m) });
+    } finally {
+      if (previous === undefined) delete process.env['ANTHROPIC_API_KEY'];
+      else process.env['ANTHROPIC_API_KEY'] = previous;
+    }
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('ANTHROPIC_API_KEY');
+    expect(messages[0]).not.toContain('chave-de-teste');
+  });
+});
