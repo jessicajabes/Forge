@@ -74,10 +74,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/preflight.ts` (novo), `src/runs.ts` (novo), `test/preflight.test.ts` (novo)
 - **O que fazer**: Implementar a 3.1.1: recusar sem TTY, fora de git, com árvore suja, em `main` ou `master`, e com lock de outra execução ativa. Criar `.workflow/runs/<data>-<slug>/` e acrescentar `.workflow/` e `.workflow.yml` ao `.git/info/exclude` sem duplicar. Os testes usam um repositório git temporário.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com um teste para cada recusa (sem TTY, sem git, árvore suja, `main`, lock ativo)
-  - [ ] Teste prova que o `.git/info/exclude` não duplica a linha em duas execuções
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com um teste para cada recusa (sem TTY, sem git, árvore suja, `main`, lock ativo)
+  - [x] Teste prova que o `.git/info/exclude` não duplica a linha em duas execuções
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T3
 
 ## T9: Orquestrador mínimo ponta a ponta
