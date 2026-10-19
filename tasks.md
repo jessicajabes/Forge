@@ -6,9 +6,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `DESIGN.md` (seção 9)
 - **O que fazer**: Testar na versão instalada do `claude` quais flags fazem o `claude -p` ignorar settings, MCPs, hooks e skills do usuário e carregar só o `CLAUDE.md` do repo-alvo (4.3). Fazer isso num diretório de teste, em modo somente leitura. Registrar na seção 9 as flags validadas, as que não funcionaram e a versão testada. Não gravar nem imprimir credenciais.
 - **Critério de aceite**:
-  - [ ] A seção 9 do `DESIGN.md` lista as flags de isolamento validadas e a versão do `claude`
-  - [ ] Um teste real mostra que, com as flags, uma skill ou MCP pessoal não é carregado e o `CLAUDE.md` do alvo é
-  - [ ] A seção 9 diz qual comportamento ainda não foi validado, se houver
+  - [x] A seção 9 do `DESIGN.md` lista as flags de isolamento validadas e a versão do `claude`
+  - [x] Um teste real mostra que, com as flags, uma skill ou MCP pessoal não é carregado e o `CLAUDE.md` do alvo é
+  - [x] A seção 9 diz qual comportamento ainda não foi validado, se houver
 - **Depende de**: nenhuma
 
 ## T2: Testar o bloqueio de `--deny-tool` no `copilot-cli`
