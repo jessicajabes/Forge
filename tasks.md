@@ -124,9 +124,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/subagents.ts` (novo), `test/subagents.test.ts` (novo)
 - **O que fazer**: Disparar subagentes (chamadas isoladas e somente leitura ao `Runner`) em paralelo, com limite `subagents.max_parallel`, saída malformada pedida de novo e escalada ao humano na terceira falha seguida, sem derrubar os que já terminaram (4.13).
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para paralelismo e limite, falha de um subagente sem derrubar os outros, saída malformada e a regra das três falhas
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para paralelismo e limite, falha de um subagente sem derrubar os outros, saída malformada e a regra das três falhas
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T4
 
 ## T14: Etapa Reconhecimento
