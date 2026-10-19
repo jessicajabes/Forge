@@ -15,9 +15,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `DESIGN.md` (seções 4.6 e 9)
 - **O que fazer**: Em diretório de teste, confirmar se `--deny-tool` bloqueia de verdade `git push`, `rm`, `curl` e `wget`, incluindo a sintaxe de prefixo `shell(rm:*)`. Registrar o resultado. Este teste libera ou mantém bloqueado o Dev no `copilot-cli` (4.6).
 - **Critério de aceite**:
-  - [ ] Cada um dos quatro comandos foi tentado com `--deny-tool` e o resultado (bloqueado ou não) está na seção 9
-  - [ ] A seção 4.6 diz se o `copilot-cli` pode ou não editar, conforme o resultado
-  - [ ] Nenhum comando destrutivo rodou fora do diretório de teste
+  - [x] Cada um dos quatro comandos foi tentado com `--deny-tool` e o resultado (bloqueado ou não) está na seção 9
+  - [x] A seção 4.6 diz se o `copilot-cli` pode ou não editar, conforme o resultado
+  - [x] Nenhum comando destrutivo rodou fora do diretório de teste
 - **Depende de**: nenhuma
 
 ## T3: Esqueleto do projeto com `vitest`
@@ -228,13 +228,13 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
   - [ ] `npm run lint` sem erros
 - **Depende de**: T9, T21, T22
 
-## T24: Runner `copilot-cli` somente leitura
+## T24: Runner `copilot-cli`
 - **Arquivos**: `src/runners/copilot-cli.ts` (novo), `test/runners/copilot-cli.test.ts` (novo)
-- **O que fazer**: Rodar `copilot -p` com `-s` ou `--output-format json`, `--no-ask-user`, `--no-custom-instructions`, `--no-auto-update`, `--usage-output-file` e `--deny-tool write --deny-tool shell` nas etapas somente leitura (4.3). Se a T2 liberar o Dev, abrir `canEdit: true` só com `--allow-tool` e `--deny-tool` para `git push`, `rm`, `curl` e `wget`. Nunca `--allow-all`, `--allow-all-tools` nem `--yolo`.
+- **O que fazer**: Rodar `copilot -p` com `-s` ou `--output-format json`, `--no-ask-user`, `--no-custom-instructions`, `--no-auto-update`, `--usage-output-file` e `--deny-tool write --deny-tool shell` nas etapas somente leitura (4.3). A T2 liberou o Dev: `canEdit: true` usa `--allow-tool write`, `--allow-tool 'shell(<comando>)'` por item de `dev.allowed_commands`, `--deny-tool` de prefixo para `git push`, `rm`, `curl` e `wget` e `--disallow-temp-dir` (4.6). Nunca `--allow-all`, `--allow-all-tools` nem `--yolo`.
 - **Critério de aceite**:
   - [ ] `npm test` passa, com teste que confirma `--deny-tool write` e `--deny-tool shell` em somente leitura
   - [ ] Teste confirma que `--allow-all`, `--allow-all-tools` e `--yolo` nunca aparecem
-  - [ ] `canEdit: true` é recusado enquanto a T2 não liberar
+  - [ ] Teste confirma que `canEdit: true` inclui `--allow-tool write`, os quatro `--deny-tool` de prefixo e `--disallow-temp-dir`
   - [ ] `npm run typecheck` sem erros
   - [ ] `npm run lint` sem erros
 - **Depende de**: T2, T4

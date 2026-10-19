@@ -111,7 +111,7 @@ Cada provedor é um arquivo pequeno em `runners/`. Sem plugin system nem registr
 | Grill | Não | `claude-cli` (padrão) ou `copilot-cli`, só leitura |
 | Reconhecimento | Não | `claude-cli` (padrão) ou `copilot-cli`, só leitura |
 | Tarefas | Não | `claude-cli` (padrão) ou `copilot-cli`, só leitura |
-| Dev | **Sim** | `claude-cli`, em arena por padrão (4.14). O `copilot-cli` não edita até o teste de `--deny-tool` passar (4.6) |
+| Dev | **Sim** | `claude-cli` (padrão) ou `copilot-cli`, em arena por padrão (4.14). O `copilot-cli` edita com as restrições da 4.6 |
 | Revisão | Não | revisores em `claude-cli` e/ou `copilot-cli`, de modelos diferentes (4.13), só leitura |
 
 O `claude-cli` roda `claude -p` como subprocesso, no `cwd` do repo-alvo, com `--output-format stream-json`, `--allowedTools` vindo de `dev.allowed_commands` e `--max-turns`. Nas etapas só de leitura (`canEdit: false`) libera apenas `Read`, `Grep` e `Glob`: sem `Edit`, `Write` nem `Bash`. É o padrão: usa o login do próprio Claude Code, sem API key. **Roda isolado por padrão** (`claude.isolated: true`): ignora settings, MCPs, hooks e skills do usuário e carrega só o `CLAUDE.md` do repo-alvo, para o resultado não depender da máquina de quem roda e para as permissões do Forge não serem contornadas. As flags que fazem esse isolamento foram validadas na versão 2.1.304 e estão na seção 9: `--setting-sources project`, `--strict-mcp-config`, `--disable-slash-commands` e `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Nas etapas somente leitura, usar `--tools Read,Grep,Glob` (que limita as ferramentas disponíveis), e não só `--allowedTools` (que só pré-aprova). `claude.isolated: false` desfaz o isolamento. Os runners `openrouter` e `claude-sdk` ficam fora da v1 (seção 10). Atenção à política de uso em 9.
@@ -127,7 +127,7 @@ Nas etapas somente leitura o CLI roda com só as ferramentas de leitura liberada
 steps:
   grill:  { runner: claude-cli, model: <modelo> }
   tasks:  { runner: claude-cli, model: <modelo> }
-  dev:    { runner: claude-cli }   # copilot-cli só depois do teste de --deny-tool (4.6); hoje só leitura
+  dev:    { runner: claude-cli }   # ou copilot-cli, com as restrições da 4.6
 claude:
   isolated: true            # só o CLAUDE.md do repo-alvo (ver 4.3)
   review:
@@ -163,7 +163,7 @@ Na v1 não há chave de API do Forge. O `claude-cli` usa o login do Claude Code 
 - Rede, `git push`, `rm -rf` e qualquer comando fora da lista ficam bloqueados. Nunca se usa `bypassPermissions`.
 - O Dev só começa depois da aprovação do plano.
 - **Branch própria e commit por lote.** Ao começar o Dev, o Forge cria a branch `forge/<slug>` e recusa rodar em `main` ou `master`. Cada lote aprovado na revisão vira um commit local, com mensagem padrão. O Forge nunca faz `git push`. Cancelar ou escalar ao humano deixa a branch como está; a pessoa pode ajustar, rebasear ou descartar.
-- **O `copilot-cli` não edita arquivos na v1** até o teste de `--deny-tool` (`git push`, `rm`, `curl`, `wget`, sintaxe `shell(rm:*)`) confirmar que bloqueia de verdade. Até lá ele roda só as etapas somente leitura (Grill, Reconhecimento, Tarefas, Revisão e juiz); o Dev e os candidatos do arena usam `claude-cli`.
+- **O `copilot-cli` pode editar no Dev e nos candidatos do arena**, liberado em 2026-10-19 depois do teste de `--deny-tool` (seção 9, T2). Regras: `--allow-tool write`; `--allow-tool 'shell(<comando>)'` só para cada item de `dev.allowed_commands`; `--deny-tool` explícito, no formato de prefixo, para `git push`, `rm`, `curl` e `wget`; `--disallow-temp-dir`; nunca `--allow-all`, `--allow-all-tools` nem `--yolo`. Não testado: escrita fora do `cwd` (ver seção 9). O padrão do Dev continua sendo `claude-cli`.
 - Com o arena (4.14), cada candidato edita só o próprio worktree, com as mesmas ferramentas e a mesma lista de comandos. Criar e remover worktrees é feito pelo código do Forge: o agente não recebe `git worktree` nem `git push`.
 - No `copilot-cli`, `dev.allowed_commands` vira `--allow-tool 'shell(...)'`. **A lista não é fronteira rígida**: no teste, com só `shell(ls)` liberado, um `cat hello.txt` rodou mesmo assim (provavelmente o CLI aprova sozinho comandos de leitura; causa não confirmada), e um comando com redirecionamento foi negado. Por isso o Forge acrescenta `--deny-tool` explícito para `git push`, `rm`, `curl` e `wget` (a sintaxe de prefixo, `shell(rm:*)`, ainda precisa de teste) e nunca usa `--allow-all`, `--allow-all-tools` nem `--yolo`. Por padrão o CLI restringe o acesso ao `cwd` e ao diretório temporário; o Forge passa `--disallow-temp-dir`.
 
@@ -269,7 +269,7 @@ Casos de borda:
 - **Árvore suja:** não ocorre, porque o Forge só começa com a árvore limpa (3.1.1). Os worktrees partem do commit atual da branch `forge/<slug>`.
 - **Tarefa `trivial`:** arena desligado por padrão (3.2).
 
-**Custo.** O Dev passa a custar N candidatos, mais o juiz, mais a integração (cerca de 4 a 5 vezes um Dev simples com N = 3, estimativa). Com `claude-cli`, o limite do plano é consumido N vezes mais rápido. Com `copilot-cli`, o CLI mede o gasto em créditos de IA (por token) ou, na cobrança legada, em premium requests por prompt; no teste uma execução `-p` com 4 chamadas ao modelo contou 1 premium request. `--max-ai-credits` limita o gasto por sessão. Em `review_mode: per_task` o arena roda a cada tarefa, e o custo se multiplica por tarefa. Por padrão os candidatos usam o modelo do Dev. Com `dev.arena.models`, cada candidato usa um modelo diferente; enquanto o `copilot-cli` não edita (4.6), os candidatos usam só modelos Claude. A estimativa relativa de custo aparece na parada humana (4.10), com a opção `rodar sem arena`. Mesmo sem a lista, a diversidade vem das tentativas independentes e do juiz de outra família.
+**Custo.** O Dev passa a custar N candidatos, mais o juiz, mais a integração (cerca de 4 a 5 vezes um Dev simples com N = 3, estimativa). Com `claude-cli`, o limite do plano é consumido N vezes mais rápido. Com `copilot-cli`, o CLI mede o gasto em créditos de IA (por token) ou, na cobrança legada, em premium requests por prompt; no teste uma execução `-p` com 4 chamadas ao modelo contou 1 premium request. `--max-ai-credits` limita o gasto por sessão. Em `review_mode: per_task` o arena roda a cada tarefa, e o custo se multiplica por tarefa. Por padrão os candidatos usam o modelo do Dev. Com `dev.arena.models`, cada candidato usa um modelo diferente; no `copilot-cli` podem ser de famílias diferentes e no `claude-cli`, só modelos Claude. A estimativa relativa de custo aparece na parada humana (4.10), com a opção `rodar sem arena`. Mesmo sem a lista, a diversidade vem das tentativas independentes e do juiz de outra família.
 
 ## 5. Formato dos artefatos
 
@@ -407,7 +407,21 @@ forge/
   - **`--bare` não serve na v1:** ele nunca lê OAuth nem keychain e exige `ANTHROPIC_API_KEY`, o que contradiz o uso do login do Claude Code (4.5).
   - **Não isolável:** a política gerenciada da organização continua valendo (o modelo ainda via as instruções de administrador), e 4 plugins permaneceram (`cc-plugin-*`; a origem não foi confirmada, a suspeita é a política gerenciada). Esses itens variam por máquina e o Forge não os controla; o README deve avisar.
   - **Não validado:** o efeito de `--setting-sources project` quando o repo-alvo tem `.claude/settings.json` com hooks próprios (o desenho aceita isso como contexto do projeto), e o `--add-dir`. Custos: sobe um processo por chamada (mais latência), carrega `CLAUDE.md`, settings, MCPs e skills do diretório onde roda (o que pode tornar o resultado menos reprodutível) e o uso conta no limite do plano. Quanto à política: a da Anthropic não permite oferecer login claude.ai nem rotear pelo plano de assinatura de usuários em produtos de terceiros; quem constrói produto com o Agent SDK deve usar API key. Isso reforça o BYOK: como o `claude-cli` é o padrão, o README deve dizer de forma explícita que cada pessoa usa o próprio login só para si, que o Forge não oferece login nem compartilha credenciais, e que, na v1, o Forge é ferramenta local de uso pessoal: o runner `claude-sdk` com API key (seção 10) é o caminho previsto para produto ou serviço de terceiros.
-- **`copilot-cli`**: mesma ergonomia do `claude-cli`, com modelos de outras famílias. Validado em 2026-10-19 na versão 1.0.100, com `copilot --help` e duas execuções reais em diretório de teste: `-p`, `-s`, `--model` (inclusive `auto`), `--no-ask-user`, `--no-custom-instructions`, `--output-format json`, `--usage-output-file`, `--deny-tool`/`--allow-tool` (`write`, `shell(...)`) e leitura somente com `--deny-tool write --deny-tool shell`. Ainda sem teste: nomes de ferramenta para `--available-tools`/`--excluded-tools`, a sintaxe `shell(rm:*)` e o `--resume`. A cobrança vem em créditos de IA ou premium requests, conforme o plano. Os termos de uso do GitHub para um produto de terceiros orquestrar o Copilot CLI não foram confirmados: como no `claude-cli`, o README deve dizer que cada pessoa usa o próprio login só para si, e a confirmação dos termos é pendência antes de publicar. Na v1 o `copilot-cli` fica ligado, mas só em etapas somente leitura (revisores, juiz, Grill, Reconhecimento, Tarefas), até o teste de `--deny-tool` passar (4.6).
+- **`copilot-cli`**: mesma ergonomia do `claude-cli`, com modelos de outras famílias. Validado em 2026-10-19 na versão 1.0.100, com `copilot --help` e duas execuções reais em diretório de teste: `-p`, `-s`, `--model` (inclusive `auto`), `--no-ask-user`, `--no-custom-instructions`, `--output-format json`, `--usage-output-file`, `--deny-tool`/`--allow-tool` (`write`, `shell(...)`) e leitura somente com `--deny-tool write --deny-tool shell`. Ainda sem teste: nomes de ferramenta para `--available-tools`/`--excluded-tools`, e o `--resume`. A sintaxe de prefixo `shell(rm:*)` foi testada em 2026-10-19 (T2, abaixo). A cobrança vem em créditos de IA ou premium requests, conforme o plano. Os termos de uso do GitHub para um produto de terceiros orquestrar o Copilot CLI não foram confirmados: como no `claude-cli`, o README deve dizer que cada pessoa usa o próprio login só para si, e a confirmação dos termos é pendência antes de publicar. Na v1 o `copilot-cli` fica ligado, inclusive para editar no Dev, com as restrições da 4.6 depois do teste de `--deny-tool` (abaixo).
+
+  **Teste de `--deny-tool`, feito em 2026-10-19 (T2), `copilot` 1.0.100, `--model auto`.** Num diretório temporário, com um remoto git local, um arquivo descartável e um servidor HTTP em `127.0.0.1`. O efeito foi medido no disco ou no log do servidor, não só na resposta do modelo. Flags comuns: `-p -s --no-ask-user --no-custom-instructions --disallow-temp-dir`.
+
+  | Comando | Só liberado (controle) | Liberado só `shell(ls)` + `--deny-tool 'shell(<cmd>:*)'` | Liberado o comando + o mesmo `--deny-tool` |
+  |---|---|---|---|
+  | `rm victim.txt` | rodou | bloqueado | bloqueado |
+  | `git push origin HEAD:refs/heads/teste` | rodou | bloqueado | bloqueado |
+  | `curl -s <url local>` | rodou | bloqueado | bloqueado |
+  | `wget -q -O - <url local>` | rodou | bloqueado | bloqueado |
+
+  - A sintaxe de prefixo `shell(rm:*)` funciona, e o `--deny-tool` vence o `--allow-tool` do mesmo comando.
+  - Com só `shell(ls)` liberado, as formas indiretas também foram bloqueadas: `sh -c 'rm ...'`, `/bin/rm`, `env rm` e `find -delete` (4 de 4, arquivo intacto).
+  - **Pegadinhas para o runner:** `curl` e `wget` com `-o`/`-O arquivo` foram negados mesmo liberados (gravar arquivo conta como escrita), e URLs exigem `--allow-url` à parte. Em uma execução anterior, comandos de leitura como `cat` rodaram sem estar na lista, então a lista de comandos continua não sendo fronteira rígida para leitura.
+  - **Não testado:** escrita fora do `cwd` com `--allow-tool write`, outros modelos além de `auto`, e mais de uma tentativa por caso. Os testes de `curl` e `wget` com `-o` ficam fora do escopo do Dev.
 - **OpenRouter** (fora da v1): dá os *modelos* do Claude e de outros provedores com uma key só, mas não os *agentes* do Claude. Roteamento do Claude Code via gateway só é suportado para modelos Claude. Apontar o Agent SDK para ele (`ANTHROPIC_BASE_URL`, uma chave só) seria opção experimental: é documentado para o Claude Code, e para o Agent SDK é inferência (falta testar); cache e betas dependem de o gateway repassar `cache_control` e os headers `anthropic-beta`.
 - **API key em open source** (para os runners futuros): ler só de variável de ambiente, `.env` no `.gitignore`, `.env.example` sem valores, considerar pre-commit de detecção de segredos (ex.: gitleaks).
 - **Outros caminhos, fora da v1**: orquestrar outros CLIs de agentes (além do `claude-cli` e do `copilot-cli`, que já estão na v1: Codex CLI, Gemini CLI, opencode, aider) como adaptadores adicionais; modelos locais (Ollama) para testes sem key.
@@ -423,7 +437,6 @@ forge/
 - Flag `--cwd`.
 - Modo não interativo (sem TTY), com `--yes`, política para a parada e as escaladas, e sem aprovação de lições.
 - Execuções em paralelo no mesmo repo.
-- Edição de arquivos pelo `copilot-cli` (Dev e candidatos), até o teste de `--deny-tool`.
 - Skills personalizadas por repo-alvo, sobrescrevendo as de `skills/`.
 - Subagentes que editam arquivos, rodam comandos ou criam outros subagentes.
 
