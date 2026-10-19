@@ -142,10 +142,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/grill.ts` (novo), `src/io.ts` (novo), `test/grill.test.ts` (novo)
 - **O que fazer**: Implementar o loop da 4.8 com `readline` atrás de uma interface de entrada e saída, para testar sem terminal: uma pergunta por vez com recomendação, `chega`, `depois`, "não sei", voltar, rejeitar o spec e saída malformada. O `spec.md` só é gravado depois da confirmação.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com um teste para `chega`, `depois`, "não sei" (decisão provisória), voltar e rejeitar o spec
-  - [ ] Teste prova que o `spec.md` não é gravado antes da confirmação
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com um teste para `chega`, `depois`, "não sei" (decisão provisória), voltar e rejeitar o spec
+  - [x] Teste prova que o `spec.md` não é gravado antes da confirmação
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T5, T6, T9
 
 ## T16: Rascunho do Grill e Ctrl+C
