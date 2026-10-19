@@ -50,3 +50,54 @@ export async function currentBranch(cwd: string): Promise<string | null> {
 export async function isClean(cwd: string): Promise<boolean> {
   return (await git(cwd, ['status', '--porcelain'])) === '';
 }
+
+export async function branchExists(
+  cwd: string,
+  name: string,
+): Promise<boolean> {
+  try {
+    await git(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkout(
+  cwd: string,
+  branch: string,
+  create = false,
+): Promise<void> {
+  await git(
+    cwd,
+    create ? ['checkout', '-q', '-b', branch] : ['checkout', '-q', branch],
+  );
+}
+
+export async function headHash(cwd: string): Promise<string> {
+  return git(cwd, ['rev-parse', 'HEAD']);
+}
+
+/**
+ * Stages everything and commits it locally. Returns the new hash, or null when there
+ * was nothing to commit. The Forge never pushes (DESIGN 4.6).
+ */
+export async function commitAll(
+  cwd: string,
+  subject: string,
+  trailers: string[],
+): Promise<string | null> {
+  await git(cwd, ['add', '-A']);
+  if ((await git(cwd, ['status', '--porcelain'])) === '') return null;
+  await git(cwd, ['commit', '-q', '-m', subject, '-m', trailers.join('\n')]);
+  return headHash(cwd);
+}
+
+/** The diff a batch introduced: `git diff <from> <to>`. */
+export async function diffBetween(
+  cwd: string,
+  from: string,
+  to = 'HEAD',
+): Promise<string> {
+  return git(cwd, ['diff', from, to]);
+}

@@ -180,10 +180,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/dev.ts` (novo), `src/git.ts` (novo), `test/dev.test.ts` (novo)
 - **O que fazer**: Criar a branch `forge/<slug>`, rodar o Dev (`claude-cli`, `canEdit: true`) por lote, rodar `dev.allowed_commands` e fazer um commit local por lote aprovado, sem `git push` (4.6, 4.7). O diff de cada lote vem dos commits. Os testes usam repositório git temporário e `Runner` falso.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que confirma a branch `forge/<slug>`, um commit por lote e nenhum `push`
-  - [ ] Teste mostra que `per_task` gera um lote por tarefa e `final`, um lote
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que confirma a branch `forge/<slug>`, um commit por lote e nenhum `push`
+  - [x] Teste mostra que `per_task` gera um lote por tarefa e `final`, um lote
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T12, T17, T18
 
 ## T20: Arena no Dev
