@@ -1,3 +1,4 @@
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { parseSpec, saveArtifact } from '../artifacts.js';
@@ -173,6 +174,58 @@ Rules:
   }
 }
 
+// ---------- the draft (DESIGN 4.8) ----------
+
+const questionSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  body: z.string(),
+  recommended: z.string(),
+});
+const draftSchema = z.object({
+  turns: z.array(
+    z.discriminatedUnion('type', [
+      z.object({
+        type: z.literal('qa'),
+        question: questionSchema,
+        answer: z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('accepted') }),
+          z.object({ kind: z.literal('custom'), text: z.string() }),
+          z.object({ kind: z.literal('provisional') }),
+          z.object({ kind: z.literal('later') }),
+        ]),
+      }),
+      z.object({ type: z.literal('correction'), text: z.string() }),
+    ]),
+  ),
+  pending: questionSchema.nullable(),
+  doubts: z.number().int().nonnegative(),
+});
+
+const draftPath = (runDir: string) => join(runDir, 'grill-draft.json');
+
+export async function loadDraft(runDir: string): Promise<GrillState | null> {
+  try {
+    return draftSchema.parse(
+      JSON.parse(await readFile(draftPath(runDir), 'utf-8')),
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function saveDraft(runDir: string, state: GrillState): Promise<void> {
+  await saveArtifact(
+    draftPath(runDir),
+    `${JSON.stringify(state, null, 2)}\n`,
+    (t) => draftSchema.parse(JSON.parse(t)),
+  );
+}
+
+async function deleteDraft(runDir: string): Promise<void> {
+  await rm(draftPath(runDir), { force: true });
+}
+
 // ---------- the stage ----------
 
 const YES = new Set(['', 's', 'sim', 'y', 'yes']);
@@ -211,8 +264,24 @@ export function createGrillStage(options: GrillOptions): StageFn {
   const { io } = options;
   return async (ctx: RunContext) => {
     const skill = await loadSkill('grill', options.skillsDir);
-    const state: GrillState = options.initial ?? emptyGrillState();
-    const save = async () => options.onProgress?.(state);
+    let initial = options.initial;
+    if (!initial) {
+      const draft = await loadDraft(ctx.run.dir);
+      if (draft && (draft.turns.length > 0 || draft.pending)) {
+        const choice = norm(
+          await io.ask(
+            'Há um rascunho do Grill. Continuar ou recomeçar? [c/r]: ',
+          ),
+        );
+        if (choice.startsWith('r')) await deleteDraft(ctx.run.dir);
+        else initial = draft;
+      }
+    }
+    const state: GrillState = initial ?? emptyGrillState();
+    const save = async () => {
+      await saveDraft(ctx.run.dir, state);
+      await options.onProgress?.(state);
+    };
     let nextNumber =
       Math.max(
         0,
@@ -254,6 +323,7 @@ export function createGrillStage(options: GrillOptions): StageFn {
       );
       if (YES.has(norm(answer))) {
         await saveArtifact(join(ctx.run.dir, 'spec.md'), spec, parseSpec);
+        await deleteDraft(ctx.run.dir);
         return true;
       }
       state.turns.push({ type: 'correction', text: answer.trim() });
@@ -262,94 +332,101 @@ export function createGrillStage(options: GrillOptions): StageFn {
       return false;
     };
 
-    for (;;) {
-      if (!state.pending) {
-        const { value } = await move({ kind: 'next' });
-        if (value.action === 'ready') {
-          if (await writeSummary(null)) return;
+    try {
+      for (;;) {
+        if (!state.pending) {
+          const { value } = await move({ kind: 'next' });
+          if (value.action === 'ready') {
+            if (await writeSummary(null)) return;
+            continue;
+          }
+          if (value.action !== 'question') continue;
+          state.pending = {
+            number: nextNumber++,
+            title: value.title,
+            body: value.body,
+            recommended: value.recommended,
+          };
+          state.doubts = 0;
+          await save();
+        }
+
+        const q = state.pending;
+        io.write(
+          `\nQ${q.number} - ${q.title}\n${q.body}\nRecomendado: ${q.recommended}`,
+        );
+        const raw = await io.ask('> ');
+        const answer = norm(raw);
+
+        if (answer === 'chega') {
+          const unanswered = state.pending;
+          state.pending = null;
+          if (await writeSummary(unanswered)) return;
           continue;
         }
-        if (value.action !== 'question') continue;
-        state.pending = {
-          number: nextNumber++,
-          title: value.title,
-          body: value.body,
-          recommended: value.recommended,
-        };
-        state.doubts = 0;
-        await save();
-      }
-
-      const q = state.pending;
-      io.write(
-        `\nQ${q.number} - ${q.title}\n${q.body}\nRecomendado: ${q.recommended}`,
-      );
-      const raw = await io.ask('> ');
-      const answer = norm(raw);
-
-      if (answer === 'chega') {
-        const unanswered = state.pending;
-        state.pending = null;
-        if (await writeSummary(unanswered)) return;
-        continue;
-      }
-      if (answer === 'voltar') {
-        const last = [...state.turns].reverse().find((t) => t.type === 'qa');
-        if (!last || last.type !== 'qa') {
-          io.write('Não há resposta anterior para desfazer.');
+        if (answer === 'voltar') {
+          const last = [...state.turns].reverse().find((t) => t.type === 'qa');
+          if (!last || last.type !== 'qa') {
+            io.write('Não há resposta anterior para desfazer.');
+            continue;
+          }
+          // the question on screen is dropped, and the last answered one is asked again
+          state.turns.splice(state.turns.lastIndexOf(last), 1);
+          state.pending = last.question;
+          nextNumber = last.question.number + 1;
+          state.doubts = 0;
+          await save();
           continue;
         }
-        // the question on screen is dropped, and the last answered one is asked again
-        state.turns.splice(state.turns.lastIndexOf(last), 1);
-        state.pending = last.question;
-        nextNumber = last.question.number + 1;
-        state.doubts = 0;
-        await save();
-        continue;
-      }
-      if (answer === 'depois') {
-        state.turns.push({
-          type: 'qa',
-          question: q,
-          answer: { kind: 'later' },
-        });
-        state.pending = null;
-        await save();
-        continue;
-      }
-      if (answer === 'nao sei') {
-        state.doubts++;
-        if (state.doubts === 1) {
-          const { value } = await move({ kind: 'help', question: q });
+        if (answer === 'depois') {
+          state.turns.push({
+            type: 'qa',
+            question: q,
+            answer: { kind: 'later' },
+          });
+          state.pending = null;
+          await save();
+          continue;
+        }
+        if (answer === 'nao sei') {
+          state.doubts++;
+          if (state.doubts === 1) {
+            const { value } = await move({ kind: 'help', question: q });
+            io.write(
+              value.action === 'help'
+                ? value.text
+                : 'Siga a recomendação se não tiver preferência.',
+            );
+            await save();
+            continue;
+          }
+          state.turns.push({
+            type: 'qa',
+            question: q,
+            answer: { kind: 'provisional' },
+          });
           io.write(
-            value.action === 'help'
-              ? value.text
-              : 'Siga a recomendação se não tiver preferência.',
+            'Seguindo a recomendação e marcando a decisão como provisória.',
           );
+          state.pending = null;
           await save();
           continue;
         }
         state.turns.push({
           type: 'qa',
           question: q,
-          answer: { kind: 'provisional' },
+          answer: YES.has(answer)
+            ? { kind: 'accepted' }
+            : { kind: 'custom', text: raw.trim() },
         });
-        io.write(
-          'Seguindo a recomendação e marcando a decisão como provisória.',
-        );
         state.pending = null;
         await save();
-        continue;
       }
-      state.turns.push({
-        type: 'qa',
-        question: q,
-        answer: YES.has(answer)
-          ? { kind: 'accepted' }
-          : { kind: 'custom', text: raw.trim() },
-      });
-      state.pending = null;
-      await save();
+    } catch (error) {
+      // Ctrl+C, an escalation or any failure: keep the progress for the next run
+      if (state.turns.length > 0 || state.pending)
+        await saveDraft(ctx.run.dir, state).catch(() => undefined);
+      throw error;
     }
   };
 }

@@ -152,9 +152,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/grill.ts`, `test/grillDraft.test.ts` (novo)
 - **O que fazer**: Ctrl+C salva `grill-draft.json` na pasta da execução. Na próxima execução, o Forge pergunta se continua ou recomeça. O rascunho é apagado quando o `spec.md` é gravado (4.8).
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste de salvar o rascunho, continuar, recomeçar e apagar depois do `spec.md`
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste de salvar o rascunho, continuar, recomeçar e apagar depois do `spec.md`
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T15
 
 ## T17: Etapa Tarefas e spec mínimo da `trivial`
