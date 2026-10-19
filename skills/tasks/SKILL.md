@@ -1,261 +1,132 @@
 ---
 name: tasks
-description: Quebra a spec em tarefas ordenadas, pequenas e verificáveis.
+description: Quebra a spec em tarefas ordenadas, pequenas e verificáveis (tasks.md).
 source: https://github.com/addyosmani/agent-skills
 source_skill: planning-and-task-breakdown
 license: MIT
-adapted: false
+adapted: true
 ---
 
-# Planning and Task Breakdown
+# Tasks
 
-## Overview
+Turn the approved spec into an ordered list of small, verifiable tasks. The Dev stage implements exactly what you write here, so a vague task becomes a vague change. Good task breakdown is the difference between a Dev that finishes reliably and one that produces a tangled mess.
 
-Decompose work into small, verifiable tasks with explicit acceptance criteria. Good task breakdown is the difference between an agent that completes work reliably and one that produces a tangled mess. Every task should be small enough to implement, test, and verify in a single focused session.
+You are read-only. Do not write code, edit files, or run commands. Read the inputs, then answer with the full contents of `tasks.md` and nothing else. The Forge validates the structure and saves the file. If the structure is broken it asks you again, so follow the format below exactly.
 
-## When to Use
+## Inputs
 
-- You have a spec and need to break it into implementable units
-- A task feels too large or vague to start
-- Work needs to be parallelized across multiple agents or sessions
-- You need to communicate scope to a human
-- The implementation order isn't obvious
+- `spec.md`: the goal, the decisions, what is out of scope, the constraints, and the open points. Decisions marked `(provisória)` were guessed, not confirmed. Do not build a task on a provisional decision without saying so in the task.
+- `context.md`: how the project is built and what a change must respect.
+- `lessons.md`, if it exists: rules learned from earlier runs. Apply them. Do not repeat a mistake the lessons already name.
 
-**When NOT to use:** Single-file changes with obvious scope, or when the spec already contains well-defined tasks.
+Read only these files and the code you need to place each task. Do not reread the whole repository: `context.md` already summarizes it.
 
-## The Planning Process
+## What every task must respect
 
-### Step 1: Enter Plan Mode
+- the pattern already in the project (naming, layout, error handling, test style);
+- compatibility with the technologies and versions in use;
+- the project context in `context.md`;
+- that nothing existing breaks. If a task changes a shared module or a public contract, say which callers it touches and add a criterion that proves they still work.
 
-Before writing any code, operate in read-only mode:
+## Process
 
-- Read the spec and relevant codebase sections
-- Identify existing patterns and conventions
-- Map dependencies between components
-- Note risks and unknowns
+### 1. Map the dependencies
 
-**Do NOT write code during planning.** The output is a plan document saved to `tasks/plan.md` and a task list recorded in the task list target (see Output Files; default `tasks/todo.md`), not implementation.
+Find what depends on what: types before the code that uses them, a shared module before its callers, a schema before the queries. Implementation order follows the graph from the bottom up.
 
-### Step 2: Identify the Dependency Graph
+### 2. Slice vertically
 
-Map what depends on what:
+Build one complete path at a time, not one layer at a time.
 
-```
-Database schema
-    │
-    ├── API models/types
-    │       │
-    │       ├── API endpoints
-    │       │       │
-    │       │       └── Frontend API client
-    │       │               │
-    │       │               └── UI components
-    │       │
-    │       └── Validation logic
-    │
-    └── Seed data / migrations
-```
+- Bad (horizontal): "all the types", then "all the endpoints", then "all the screens", then "connect everything".
+- Good (vertical): "user can create an account (schema, API, UI)", then "user can log in", and so on.
 
-Implementation order follows the dependency graph bottom-up: build foundations first.
+Each task delivers something that works and can be tested alone. Only slice horizontally when the project has no way to test a vertical slice yet, such as a shared base that every slice needs. Then make that base its own task and keep it small.
 
-### Step 3: Slice Vertically
+### 3. Size the tasks
 
-Instead of building all the database, then all the API, then all the UI — build one complete feature path at a time:
+| Size | Files | Example |
+|---|---|---|
+| XS | 1 | add a validation rule |
+| S | 1-2 | add one endpoint |
+| M | 3-5 | one feature slice |
+| L or more | 6+ | too large: split it |
 
-**Bad (horizontal slicing):**
-```
-Task 1: Build entire database schema
-Task 2: Build all API endpoints
-Task 3: Build all UI components
-Task 4: Connect everything
-```
+An agent works best on S and M tasks. Split a task when:
 
-**Good (vertical slicing):**
-```
-Task 1: User can create an account (schema + API + UI for registration)
-Task 2: User can log in (auth schema + API + UI for login)
-Task 3: User can create a task (task schema + API + UI for creation)
-Task 4: User can view task list (query + API + UI for list view)
-```
+- it touches more than about 5 files;
+- you cannot state its acceptance criteria in 3 or 4 checks;
+- it touches two or more independent subsystems;
+- its title needs the word "and".
 
-Each vertical slice delivers working, testable functionality.
+Do not split into tiny tasks either. The Dev may run each task as its own batch (`review_mode: per_task`), and every batch costs a full Dev run with review. Prefer fewer, right-sized tasks.
 
-### Step 4: Write Tasks
+### 4. Make each task a safe stopping point
 
-Each task follows this structure, whether it lands in the markdown task list or as an item in an external tracker (see Output Files):
+The Forge may commit and review after any single task. So every task must:
 
-```markdown
-## Task [N]: [Short descriptive title]
+- leave the project in a working state: it builds, and the existing tests pass;
+- be checkable on its own, without waiting for a later task;
+- depend only on earlier tasks, never on a later one.
 
-**Description:** One paragraph explaining what this task accomplishes.
+Put the riskiest or least certain task early, so a wrong assumption fails fast. Every 2 or 3 tasks, make sure the last task of the group ends in a check of the whole flow so far (full test run, build, or an end-to-end behavior), not only its own change.
 
-**Acceptance criteria:**
-- [ ] [Specific, testable condition]
-- [ ] [Specific, testable condition]
+### 5. Write the acceptance criteria
 
-**Verification:**
-- [ ] Tests pass: [the repository's focused-test command]
-- [ ] Build succeeds: [the repository's build command]
-- [ ] Manual check: [description of what to verify]
+Every criterion must be checkable by a command or an observable behavior: a test that passes, a clean lint, a response a person can see. "Works well" and "is clean" are not criteria.
 
-**Dependencies:** [Task numbers this depends on, or "None"]
+- Use only commands found in `context.md` or in the repo. Never invent a command. If the project has no test command, say so in the task, and write the criterion as an observable behavior.
+- Every task that changes behavior includes a criterion for a new or updated test.
+- Every task includes the project's lint or format check when `context.md` lists one.
 
-**Files likely touched:**
-- `src/path/to/file.ts`
-- `tests/path/to/test.ts`
+## Output format
 
-**Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
-```
-
-### Step 5: Order and Checkpoint
-
-Arrange tasks so that:
-
-1. Dependencies are satisfied (build foundation first)
-2. Each task leaves the system in a working state
-3. Verification checkpoints occur after every 2-3 tasks
-4. High-risk tasks are early (fail fast)
-
-Add explicit checkpoints to the task list target:
+Answer with this structure, in the language the spec is written in. Keep the headings and field names as they are.
 
 ```markdown
-## Checkpoint: After Tasks 1-3
-- [ ] All tests pass
-- [ ] Application builds without errors
-- [ ] Core user flow works end-to-end
-- [ ] Review with human before proceeding
+# Tarefas
+
+## T1: <title>
+- **Arquivos**: src/..., src/...
+- **O que fazer**: <one short paragraph: what to change and why, not a line-by-line recipe>
+- **Critério de aceite**:
+  - [ ] `<test command>` passes, with a new test for ...
+  - [ ] `<lint command>` has no errors
+- **Depende de**: nenhuma
 ```
 
-## Task Sizing Guidelines
+Rules for the format:
 
-| Size | Files | Scope | Example |
-|------|-------|-------|---------|
-| **XS** | 1 | Single function or config change | Add a validation rule |
-| **S** | 1-2 | One component or endpoint | Add a new API endpoint |
-| **M** | 3-5 | One feature slice | User registration flow |
-| **L** | 5-8 | Multi-component feature | Search with filtering and pagination |
-| **XL** | 8+ | **Too large — break it down further** | — |
+- Number tasks `T1`, `T2`, ... in the order they should run.
+- `Arquivos` lists the files the task is likely to touch, as paths. Say "novo" next to a file to create.
+- `Depende de` lists task numbers (`T1, T2`) or `nenhuma`. A task may only depend on a lower number.
+- Do not add a "how to implement" field beyond `O que fazer`. The Dev decides the details. Do not write code.
+- The Dev marks the boxes `[x]` when done, so keep each box a single check.
 
-If a task is L or larger, it should be broken into smaller tasks. An agent performs best on S and M tasks.
+## Respect the spec
 
-**When to break a task down further:**
-- It would take more than one focused session (roughly 2+ hours of agent work)
-- You cannot describe the acceptance criteria in 3 or fewer bullet points
-- It touches two or more independent subsystems (e.g., auth and billing)
-- You find yourself writing "and" in the task title (a sign it is two tasks)
+- Do not add a task for anything under "Fora do escopo".
+- Cover every decision in `Decisões` that needs a change in the code. A decision with no task is a gap; flag it.
+- If `Pontos em aberto` still has items that affect a task, say in that task which open point it waits on. Do not guess the answer.
+- If you cannot break the work into tasks without a missing decision, say what is missing at the end under `## Dúvidas` as a short list. The Forge shows it at the human stop.
 
-## Output Files
+## Common mistakes
 
-- **Plan document:** Save the implementation plan to `tasks/plan.md`. This is always a markdown file — design decisions, risks, and open questions don't map cleanly onto individual tracker issues.
-- **Task list:** Record each task in the **task list target** (defined below).
-
-Create the `tasks/` directory if it does not exist.
-
-**Never overwrite an incomplete plan.** Before writing `tasks/plan.md` or `tasks/todo.md`, check whether they already exist and still contain unchecked tasks:
-
-- Same work being replanned (the user asked to revise or extend this plan) → update the existing files in place.
-- Different work → **stop and ask.** The unchecked tasks may be mid-build in another session. Do not delete, overwrite, or rename the existing files on your own; present the conflict and let the user decide (finish the old plan first, explicitly discard it, or tell you where the new plan should go).
-
-The same rule applies to an external task list target: never bulk-close or delete another plan's open tracker items to make room for new ones.
-
-### Task List Target
-
-The task list target is where tasks and checkpoints are recorded. It is defined once, here; every other reference in this skill defers to it.
-
-- **Default: a checklist-style markdown file at `tasks/todo.md`.** This is the convention the `/build` command and other downstream tooling expect. Use it unless the project says otherwise.
-- **External tracker:** if the project's agent rules (`CLAUDE.md`, `AGENTS.md`, etc.) or the user designate an issue tracker (e.g. GitHub Issues, Jira, Linear, `bd`/beads), create one tracker item per task instead of writing `tasks/todo.md`. Map the Step 4 structure onto the tracker's fields: acceptance criteria and verification steps in the item body, dependencies via the tracker's linking mechanism (`bd dep add`, "blocked by", etc.). Record Step 5 checkpoints as tracker items too, or as a checklist in the plan document if the tracker has no natural equivalent.
-
-When using an external tracker, note it in `tasks/plan.md` (e.g. "Tasks tracked in Linear project FOO") so downstream steps and future sessions know where to look, and keep the plan document's Task List section as an ordered index of tracker item IDs or links rather than a duplicate checklist.
-
-## Plan Document Template
-
-```markdown
-# Implementation Plan: [Feature/Project Name]
-
-## Overview
-[One paragraph summary of what we're building]
-
-## Architecture Decisions
-- [Key decision 1 and rationale]
-- [Key decision 2 and rationale]
-
-## Task List
-
-### Phase 1: Foundation
-- [ ] Task 1: ...
-- [ ] Task 2: ...
-
-### Checkpoint: Foundation
-- [ ] Tests pass, builds clean
-
-### Phase 2: Core Features
-- [ ] Task 3: ...
-- [ ] Task 4: ...
-
-### Checkpoint: Core Features
-- [ ] End-to-end flow works
-
-### Phase 3: Polish
-- [ ] Task 5: ...
-- [ ] Task 6: ...
-
-### Checkpoint: Complete
-- [ ] All acceptance criteria met
-- [ ] Ready for review
-
-## Risks and Mitigations
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| [Risk] | [High/Med/Low] | [Strategy] |
-
-## Open Questions
-- [Question needing human input]
-```
-
-When tasks live in an external tracker, keep the Task List section above as an ordered index of tracker item IDs or links instead of a duplicate checklist.
-
-## Parallelization Opportunities
-
-When multiple agents or sessions are available:
-
-- **Safe to parallelize:** Independent feature slices, tests for already-implemented features, documentation
-- **Must be sequential:** Database migrations, shared state changes, dependency chains
-- **Needs coordination:** Features that share an API contract (define the contract first, then parallelize)
-
-## Common Rationalizations
-
-| Rationalization | Reality |
+| Mistake | What to do instead |
 |---|---|
-| "I'll figure it out as I go" | That's how you end up with a tangled mess and rework. 10 minutes of planning saves hours. |
-| "The tasks are obvious" | Write them down anyway. Explicit tasks surface hidden dependencies and forgotten edge cases. |
-| "Planning is overhead" | Planning is the task. Implementation without a plan is just typing. |
-| "I can hold it all in my head" | Context windows are finite. Written plans survive session boundaries and compaction. |
-| "The old `tasks/plan.md` is stale, I'll just replace it" | Unchecked tasks may be mid-build in another session. Overwriting them destroys work state that exists nowhere else. Stop and ask. |
+| "The tasks are obvious" | Write them down anyway. It shows hidden dependencies and forgotten edge cases. |
+| One task per layer | Slice vertically, one working path per task. |
+| "Implement the feature" with no criteria | Add checks a command can verify. |
+| A task that only passes once a later task exists | Reorder, or merge the two. |
+| A command in a criterion that is not in the repo | Read `context.md`; use only real commands. |
+| One huge task to save batches | Split it by the rules in step 3. |
 
-## Red Flags
+## Check before you answer
 
-- Starting implementation without a written task list
-- Overwriting a `tasks/plan.md` or `tasks/todo.md` that still has unchecked tasks for different work, without asking
-- Writing `tasks/todo.md` when the project has designated an external tracker (or scattering tasks across both)
-- Tasks that say "implement the feature" without acceptance criteria
-- No verification steps in the plan
-- All tasks are XL-sized
-- No checkpoints between tasks
-- Dependency order isn't considered
-
-## Verification
-
-Before starting implementation, confirm:
-
-- [ ] Every task has acceptance criteria
-- [ ] Every task has a verification step
-- [ ] Task dependencies are identified and ordered correctly
-- [ ] Tasks are recorded in the task list target (default `tasks/todo.md`)
-- [ ] No pre-existing incomplete plan was overwritten without explicit user confirmation
-- [ ] No task touches more than ~5 files
-- [ ] Checkpoints exist between major phases
-- [ ] The human has reviewed and approved the plan
-
-## See Also
-
-Acceptance criteria are per-task and answer "did we build the right thing?". They sit on top of the project-wide Definition of Done, the standing bar every task clears before it counts as done. See `../../references/definition-of-done.md`.
+- [ ] Every task has at least one checkable acceptance criterion.
+- [ ] Every command in a criterion exists in `context.md` or the repo.
+- [ ] Every dependency points to a lower task number.
+- [ ] No task is larger than about 5 files, and none has "and" in its title.
+- [ ] Every task leaves the project working on its own.
+- [ ] Nothing from "Fora do escopo" appears, and every decision that changes code has a task.
+- [ ] The rules in `lessons.md` are applied.

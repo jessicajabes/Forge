@@ -301,6 +301,8 @@ Uma seção por tarefa, com campos fixos. Todo critério de aceite é verificáv
 - **Depende de**: nenhuma
 ```
 
+Quando falta uma decisão para quebrar o trabalho em tarefas, o `tasks.md` termina com uma seção opcional `## Dúvidas`: uma lista curta do que falta. Ela só existe nesse caso. O Forge mostra a seção na parada humana (4.10), junto com as tarefas.
+
 ### 5.3 `review.md`
 Resumo no topo e um bloco por ciclo, com o problema do revisor e a resposta do Dev lado a lado. Cada problema aponta a tarefa (`T1`, `T2`) a que se refere.
 
@@ -341,6 +343,7 @@ Uma linha de Markdown por lição: a regra em uma frase, a data e a tarefa de or
 
 ### 6.2 Aprendizado do revisor (memória de lições)
 O modelo em si não muda e não há treino. O revisor "aprende" por memória:
+- Os subagentes de Lições (lentes Judgment, Tooling e Divergent, mais um sintetizador, adaptados da `reflect` da pstack) leem só artefatos da execução (`review.md`, `arena.md`, `tasks.md`, `spec.md`) e o diff dos commits do lote. Nunca leem a conversa do Grill nem a transcrição da sessão do CLI.
 - No fim de cada execução, o Forge propõe lições novas a partir do `review.md`: problemas que o revisor apontou mais de uma vez e divergências em que o usuário decidiu a favor de um dos lados.
 - O usuário aprova cada proposta (`sim`, `não`, `editar`). **Nada é gravado sem aprovação**, porque uma lição errada contamina as revisões seguintes.
 - `lessons.md` é lido por **revisor, Dev e Tarefas**. O Grill não lê.
