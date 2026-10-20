@@ -44,6 +44,43 @@ describe('logCalls', () => {
     expect(await readFile(path, 'utf-8')).not.toContain('SEGREDO-NO-PROMPT');
   });
 
+  it('records the real model when the runner reports it, and forwards the event', async () => {
+    const path = join(
+      await mkdtemp(join(tmpdir(), 'forge-calls-')),
+      'calls.jsonl',
+    );
+    const factory: RunnerFactory = () => async (req) => {
+      req.onEvent?.({ type: 'model', model: 'claude-real-1' });
+      return 'ok';
+    };
+    const seen: string[] = [];
+    await logCalls(factory, path)({ cwd: '/x', model: 'configured' })({
+      prompt: 'p',
+      files: [],
+      canEdit: false,
+      onEvent: (e) => seen.push(e.type),
+    });
+    expect((await lines(path))[0]).toMatchObject({ model: 'claude-real-1' });
+    expect(seen).toEqual(['model']);
+  });
+
+  it('keeps the configured model when the runner reports none', async () => {
+    const path = join(
+      await mkdtemp(join(tmpdir(), 'forge-calls-')),
+      'calls.jsonl',
+    );
+    const factory: RunnerFactory = () => async (req) => {
+      req.onEvent?.({ type: 'tool', name: 'Read', arg: 'a.ts' });
+      return 'ok';
+    };
+    await logCalls(factory, path)({ cwd: '/x', model: 'configured' })({
+      prompt: 'p',
+      files: [],
+      canEdit: false,
+    });
+    expect((await lines(path))[0]).toMatchObject({ model: 'configured' });
+  });
+
   it('records a failed call and rethrows the error', async () => {
     const path = join(
       await mkdtemp(join(tmpdir(), 'forge-calls-')),

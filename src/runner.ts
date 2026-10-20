@@ -1,3 +1,8 @@
+/** What a runner may report while it works, when the provider exposes it. */
+export type RunnerEvent =
+  | { type: 'model'; model: string }
+  | { type: 'tool'; name: string; arg: string };
+
 /**
  * The only thing the orchestrator knows about a provider (DESIGN 4.2).
  * Each provider is a small file in `runners/` that returns a function of this type.
@@ -9,6 +14,8 @@ export type RunRequest = {
   files: string[];
   /** false = read-only, true = may edit the project. */
   canEdit: boolean;
+  /** Optional: a runner that can tell its tools or real model calls this. */
+  onEvent?: (event: RunnerEvent) => void;
 };
 
 /** Returns the text of the artifact produced. */
