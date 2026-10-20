@@ -1,11 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { RunRequest, Runner } from '../runner.js';
+import {
+  RunnerError,
+  RunnerTimeoutError,
+  type RunRequest,
+  type Runner,
+} from '../runner.js';
 
-export class CopilotCliError extends Error {
-  constructor(message: string) {
-    super(message);
+export class CopilotCliError extends RunnerError {
+  constructor(
+    message: string,
+    details: { stderr?: string; exitCode?: number | null } = {},
+  ) {
+    super(message, details);
     this.name = 'CopilotCliError';
   }
 }
@@ -134,7 +142,13 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
           ? undefined
           : setTimeout(() => {
               child.kill('SIGTERM');
-              reject(new CopilotCliError(`o copilot passou de ${timeout} ms`));
+              reject(
+                new RunnerTimeoutError(
+                  `o copilot passou de ${timeout} ms`,
+                  timeout,
+                  stderr,
+                ),
+              );
             }, timeout);
       child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
@@ -152,10 +166,16 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
           reject(
             new CopilotCliError(
               `o copilot terminou com código ${code}: ${stderr.trim().slice(0, 300)}`,
+              { stderr, exitCode: code },
             ),
           );
         } else if (stdout.trim() === '') {
-          reject(new CopilotCliError('o copilot não devolveu texto'));
+          reject(
+            new CopilotCliError('o copilot não devolveu texto', {
+              stderr,
+              exitCode: code,
+            }),
+          );
         } else {
           resolve(stdout.trim());
         }

@@ -3,6 +3,31 @@ export type RunnerEvent =
   | { type: 'model'; model: string }
   | { type: 'tool'; name: string; arg: string };
 
+/** A failed runner call. Carries the CLI's full stderr and exit code for the reporter. */
+export class RunnerError extends Error {
+  readonly stderr: string;
+  readonly exitCode: number | null;
+  constructor(
+    message: string,
+    details: { stderr?: string; exitCode?: number | null } = {},
+  ) {
+    super(message);
+    this.name = 'RunnerError';
+    this.stderr = details.stderr ?? '';
+    this.exitCode = details.exitCode ?? null;
+  }
+}
+
+/** The call hit its time limit and the CLI was killed. */
+export class RunnerTimeoutError extends RunnerError {
+  readonly limitMs: number;
+  constructor(message: string, limitMs: number, stderr = '') {
+    super(message, { stderr });
+    this.name = 'RunnerTimeoutError';
+    this.limitMs = limitMs;
+  }
+}
+
 /**
  * The only thing the orchestrator knows about a provider (DESIGN 4.2).
  * Each provider is a small file in `runners/` that returns a function of this type.

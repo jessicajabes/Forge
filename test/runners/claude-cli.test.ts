@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
+import { RunnerTimeoutError } from '../../src/runner.js';
 import {
   ClaudeCliError,
   buildInvocation,
@@ -165,12 +166,14 @@ describe('parseStreamEvents', () => {
 });
 
 describe('createClaudeCliRunner', () => {
-  function fakeChild(output: string, code = 0): ChildProcess {
+  function fakeChild(output: string, code = 0, stderrText = ''): ChildProcess {
     const child = new EventEmitter() as ChildProcess;
     const stdout = new PassThrough();
+    const stderr = new PassThrough();
     const stdin = new PassThrough();
-    Object.assign(child, { stdout, stderr: new PassThrough(), stdin });
+    Object.assign(child, { stdout, stderr, stdin });
     stdin.on('finish', () => {
+      stderr.end(stderrText);
       stdout.end(output);
       setImmediate(() => child.emit('close', code));
     });
@@ -244,7 +247,9 @@ describe('createClaudeCliRunner', () => {
       runner(edit).then(settle, settle);
       const readResult = runner(read).catch((e: unknown) => e);
       await vi.advanceTimersByTimeAsync(31 * 60_000);
-      expect(await readResult).toBeInstanceOf(ClaudeCliError);
+      const timedOut = await readResult;
+      expect(timedOut).toBeInstanceOf(RunnerTimeoutError);
+      expect((timedOut as RunnerTimeoutError).limitMs).toBe(30 * 60_000);
       expect(editSettled).toBe(false);
 
       const limited = createClaudeCliRunner({
@@ -254,7 +259,9 @@ describe('createClaudeCliRunner', () => {
       });
       const outcome = limited(edit).catch((e: unknown) => e);
       await vi.advanceTimersByTimeAsync(61_000);
-      expect(await outcome).toBeInstanceOf(ClaudeCliError);
+      const edited = await outcome;
+      expect(edited).toBeInstanceOf(RunnerTimeoutError);
+      expect((edited as RunnerTimeoutError).limitMs).toBe(60_000);
     } finally {
       vi.useRealTimers();
     }
@@ -266,6 +273,20 @@ describe('createClaudeCliRunner', () => {
       spawnFn: () => fakeChild('', 1),
     });
     await expect(runner(read)).rejects.toThrow(ClaudeCliError);
+  });
+
+  it('a failure carries the full stderr and the exit code', async () => {
+    const long = Array.from({ length: 80 }, (_, i) => `linha ${i}`).join('\n');
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: () => fakeChild('', 3, long),
+    });
+    const error = (await runner(read).catch(
+      (e: unknown) => e,
+    )) as ClaudeCliError;
+    expect(error).toBeInstanceOf(ClaudeCliError);
+    expect(error.stderr).toBe(long);
+    expect(error.exitCode).toBe(3);
   });
 
   it('warns when ANTHROPIC_API_KEY would replace the login', () => {

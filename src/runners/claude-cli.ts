@@ -1,10 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { summarizeToolArg } from '../progress.js';
-import type { RunRequest, Runner, RunnerEvent } from '../runner.js';
+import {
+  RunnerError,
+  RunnerTimeoutError,
+  type RunRequest,
+  type Runner,
+  type RunnerEvent,
+} from '../runner.js';
 
-export class ClaudeCliError extends Error {
-  constructor(message: string) {
-    super(message);
+export class ClaudeCliError extends RunnerError {
+  constructor(
+    message: string,
+    details: { stderr?: string; exitCode?: number | null } = {},
+  ) {
+    super(message, details);
     this.name = 'ClaudeCliError';
   }
 }
@@ -196,7 +205,13 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
           ? undefined
           : setTimeout(() => {
               child.kill('SIGTERM');
-              reject(new ClaudeCliError(`o claude passou de ${limit} ms`));
+              reject(
+                new RunnerTimeoutError(
+                  `o claude passou de ${limit} ms`,
+                  limit,
+                  stderr,
+                ),
+              );
             }, limit);
 
       child.stdout?.on('data', (chunk: Buffer) => {
@@ -228,7 +243,12 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
             code === 0
               ? ''
               : ` (código ${code}: ${stderr.trim().slice(0, 300)})`;
-          reject(new ClaudeCliError(`${(error as Error).message}${detail}`));
+          reject(
+            new ClaudeCliError(`${(error as Error).message}${detail}`, {
+              stderr,
+              exitCode: code,
+            }),
+          );
         }
       });
       child.stdin?.end(stdin);

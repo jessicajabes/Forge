@@ -4,7 +4,8 @@ import type { ChildProcess } from 'node:child_process';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { RunnerTimeoutError } from '../../src/runner.js';
 import {
   CopilotCliError,
   buildInvocation,
@@ -124,6 +125,40 @@ describe('createCopilotCliRunner', () => {
         read,
       ),
     ).rejects.toBeInstanceOf(CopilotCliError);
+  });
+
+  it('carries the full stderr and the exit code on a failure', async () => {
+    const long = Array.from({ length: 40 }, (_, i) => `linha ${i}`).join('\n');
+    const error = await createCopilotCliRunner({
+      cwd: '/r',
+      spawnFn: () => fakeChild('', 3, long),
+    })(read).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CopilotCliError);
+    expect((error as CopilotCliError).stderr).toBe(long);
+    expect((error as CopilotCliError).exitCode).toBe(3);
+  });
+
+  it('a timeout throws RunnerTimeoutError with the limit', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: () => true,
+      });
+      const outcome = createCopilotCliRunner({
+        cwd: '/r',
+        timeoutMs: 5_000,
+        spawnFn: () => child,
+      })(read).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(6_000);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(RunnerTimeoutError);
+      expect((error as RunnerTimeoutError).limitMs).toBe(5_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('puts a very long prompt in a file inside the working directory instead of the argument', async () => {
