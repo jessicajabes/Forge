@@ -254,9 +254,9 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `README.md` (novo)
 - **O que fazer**: Escrever o README em inglês: o que é o Forge, instalação, uso, os runners, o aviso de que cada pessoa usa o próprio login só para si e que o Forge não oferece login nem compartilha credenciais (seção 9), as três fontes das skills e o link para `THIRD_PARTY_LICENSES.md`.
 - **Critério de aceite**:
-  - [ ] O README tem o aviso de login pessoal e cita `mattpocock/skills`, `backnotprop/pstack` e `addyosmani/agent-skills`
-  - [ ] Todo comando do README existe em `package.json` ou na CLI
-  - [ ] Nenhuma menção a empregador, a sistemas ou a contexto interno
+  - [x] O README tem o aviso de login pessoal e cita `mattpocock/skills`, `backnotprop/pstack` e `addyosmani/agent-skills`
+  - [x] Todo comando do README existe em `package.json` ou na CLI
+  - [x] Nenhuma menção a empregador, a sistemas ou a contexto interno
 - **Depende de**: T25
 
 ## T27: Tarefas de referência manuais
