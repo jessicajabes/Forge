@@ -127,12 +127,18 @@ function renderReview(
   status: 'approved' | 'escalated',
   max: number,
   reason?: string,
+  /** `consider` items still open when the cycle limit approved the batch. */
+  leftover: Item[] = [],
 ): string {
+  const atLimit =
+    leftover.length > 0
+      ? `\n- **Aprovado no limite de ciclos**: ${leftover.length} ${leftover.length === 1 ? 'item' : 'itens'} \`consider\` ficaram em aberto e foram anotados, sem voltar ao Dev: ${leftover.map((i) => i.title).join('; ')}`
+      : '';
   const head = `# Revisão
 
 ## Resumo
 - **Veredito**: ${status === 'approved' ? 'aprovado' : 'escalado ao humano'}
-- **Ciclos realizados**: ${cycles.length} de ${max}${reason ? `\n- **Motivo da escalada**: ${reason}` : ''}
+- **Ciclos realizados**: ${cycles.length} de ${max}${atLimit}${reason ? `\n- **Motivo da escalada**: ${reason}` : ''}
 `;
   const blocks = cycles.map((c) => {
     const sent =
@@ -180,7 +186,7 @@ export async function reviewBatch(
   deps: ReviewDeps,
   /** Sends items back to the Dev and returns its report. */
   devFix: (feedback: string) => Promise<string>,
-): Promise<{ cycles: number; reviewPath: string }> {
+): Promise<{ cycles: number; reviewPath: string; leftover: Item[] }> {
   const max = ctx.config.max_review_cycles;
   const reviewPath = join(ctx.run.dir, `review-batch-${batch.index}.md`);
   const skill = await loadSkill('review', deps.skillsDir);
@@ -307,7 +313,7 @@ export async function reviewBatch(
         renderReview(cycles, 'approved', max),
         () => undefined,
       );
-      return { cycles: number, reviewPath };
+      return { cycles: number, reviewPath, leftover: [] };
     }
 
     // 3. An act_on item kept after the Dev's justification: straight to the human.
@@ -331,10 +337,21 @@ export async function reviewBatch(
         `o revisor manteve ${keptActOn.length === 1 ? 'um item' : 'itens'} act_on depois da justificativa do Dev (${keptActOn.map((i) => i.title).join('; ')})`,
       );
     }
-    if (number === max)
+    if (number === max) {
+      // At the limit, only `consider` items left means no real blocker: the batch is
+      // approved and the leftovers are noted. An open `act_on` still goes to the human.
+      if (verdict.act_on.length === 0) {
+        await saveArtifact(
+          reviewPath,
+          renderReview(cycles, 'approved', max, undefined, sent),
+          () => undefined,
+        );
+        return { cycles: number, reviewPath, leftover: sent };
+      }
       await escalate(
-        `limite de ${max} ciclos de revisão atingido com itens abertos`,
+        `limite de ${max} ciclos de revisão atingido com itens act_on abertos`,
       );
+    }
 
     // 4. Back to the Dev with the numbered items; items kept from before come along.
     const carried: SentItem[] = verdict.previous_items

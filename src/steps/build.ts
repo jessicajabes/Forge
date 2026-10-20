@@ -47,7 +47,7 @@ export function createBuildStage(options: BuildOptions): StageFn {
       if (arena) await runArena(ctx, batch, { makeRunner, io, ...skill });
       else await runDevBatch(ctx, batch, skill);
 
-      const { cycles } = await reviewBatch(
+      const { cycles, leftover } = await reviewBatch(
         ctx,
         batch,
         { makeRunner, io, ...skill },
@@ -59,6 +59,11 @@ export function createBuildStage(options: BuildOptions): StageFn {
           ? `Lote ${batch.index}: aprovado em ${cycles} ciclo(s), mas sem mudanças para commitar.`
           : `Lote ${batch.index} aprovado em ${cycles} ciclo(s) e commitado (${hash.slice(0, 7)}).`,
       );
+      if (leftover.length > 0) {
+        io.write(
+          `Lote ${batch.index}: ${leftover.length} item(ns) consider ficaram em aberto no limite de ciclos e estão anotados no review.`,
+        );
+      }
     }
     await writeReview(ctx.run.dir, batches.length);
   };

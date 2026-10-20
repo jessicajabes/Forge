@@ -40,7 +40,7 @@ const TASKS = `# Tarefas
 const APPROVED = JSON.stringify({ verdict: 'approved' });
 const REJECT = JSON.stringify({
   verdict: 'rejected',
-  consider: [{ title: 'Ainda aberto', description: 'd' }],
+  act_on: [{ title: 'Ainda aberto', description: 'd' }],
 });
 
 type Script = {

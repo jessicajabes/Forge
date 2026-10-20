@@ -225,8 +225,8 @@ describe('reviewBatch', () => {
     expect(s.deps.io.output()).toContain('Vale o cálculo do Forge');
   });
 
-  it('stops at the cycle limit and escalates with review.md saved', async () => {
-    const still = lead({ consider: [item('Ainda aberto')] });
+  it('at the cycle limit, an open act_on item escalates to the human with review.md saved', async () => {
+    const still = lead({ act_on: [item('Bug aberto')] });
     const s = await setup([still, still, still]);
     await expect(
       reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
@@ -237,8 +237,30 @@ describe('reviewBatch', () => {
     expect(review).toContain('limite de 3 ciclos');
   });
 
+  it('at the cycle limit, only consider items left means the batch is approved and the leftovers are noted', async () => {
+    const still = lead({ consider: [item('Detalhe de estilo')] });
+    const s = await setup([still, still, still]);
+    const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(result.cycles).toBe(3);
+    expect(result.leftover.map((i) => i.title)).toEqual(['Detalhe de estilo']);
+    expect(s.feedbacks).toHaveLength(2); // the Dev is not called after the last cycle
+    const review = await readFile(s.reviewPath, 'utf-8');
+    expect(review).toContain('- **Veredito**: aprovado');
+    expect(review).toContain('Aprovado no limite de ciclos');
+    expect(review).toContain('Detalhe de estilo');
+  });
+
+  it('consider items still go back to the Dev in the cycles before the limit', async () => {
+    const still = lead({ consider: [item('Detalhe')] });
+    const s = await setup([still, APPROVED]);
+    const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(result.cycles).toBe(2);
+    expect(result.leftover).toEqual([]);
+    expect(s.feedbacks).toHaveLength(1);
+  });
+
   it('respects max_review_cycles from the config', async () => {
-    const still = lead({ consider: [item('Aberto')] });
+    const still = lead({ act_on: [item('Aberto')] });
     const s = await setup([still, still], 'max_review_cycles: 2');
     await expect(reviewBatch(s.ctx, s.batch, s.deps, s.devFix)).rejects.toThrow(
       /limite de 2 ciclos/,
