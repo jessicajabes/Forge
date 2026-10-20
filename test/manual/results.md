@@ -39,4 +39,4 @@ All four versions solve the task and pass the tests. The code is equivalent: a g
 
 ## Decision
 
-Pending the author: keep the arena as the default, or turn it off by default and keep `--arena <n>`.
+**The arena stays on by default**, as the author decided on 2026-10-20. The reasons: quality was a tie, the extra cost measured over the whole flow is small (about 18%), and one small task cannot show that the arena does not help. The arena is not proven either: on a small task it gave no visible gain. Repeat the measurement on larger tasks, with different models per candidate (`dev.arena.models`) and a judge of another family, before treating it as proven.
