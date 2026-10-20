@@ -184,12 +184,16 @@ export async function runArena(
       ctx.config.subagents.max_parallel,
       async (index) => {
         const dir = join(arenaDir, `candidato-${index}`);
-        const model = cfg.models?.[(index - 1) % (cfg.models?.length || 1)];
+        // One model per candidate when `dev.arena.models` is set; otherwise the Dev's own.
+        const model =
+          cfg.models?.[(index - 1) % (cfg.models?.length || 1)] ??
+          ctx.config.steps.dev.model;
         try {
           await addWorktree(ctx.cwd, dir);
           worktrees.push(dir);
           const runner = deps.makeRunner({
             cwd: dir,
+            runner: ctx.config.steps.dev.runner,
             ...(model ? { model } : {}),
             allowedCommands: allowed,
           });

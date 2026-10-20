@@ -94,3 +94,19 @@ export async function loadReference(
   const marker = text.indexOf('\n---\n');
   return (marker === -1 ? text : text.slice(marker + 5)).trim();
 }
+
+/** Reads a reference file whole, with no template header to strip. */
+export async function readReference(
+  stage: Stage,
+  name: string,
+  skillsDir: string = DEFAULT_SKILLS_DIR,
+): Promise<string> {
+  const path = join(skillsDir, stage, 'references', `${name}.md`);
+  try {
+    return (await readFile(path, 'utf-8')).trim();
+  } catch {
+    throw new SkillError(
+      `referência "${name}" da etapa "${stage}" não encontrada em ${path}`,
+    );
+  }
+}

@@ -8,13 +8,10 @@ import {
   currentBranch,
   git,
 } from '../git.js';
-import type { IO } from '../io.js';
-import type { RunContext, StageFn } from '../orchestrator.js';
+import type { RunContext } from '../orchestrator.js';
 import { workflowDir, type Run } from '../runs.js';
 import { loadSkill } from '../skills.js';
 import { saveArtifact } from '../artifacts.js';
-import { runArena } from '../arena.js';
-import type { RunnerFactory } from '../runner.js';
 
 export type Batch = { index: number; total: number; tasks: Task[] };
 
@@ -203,59 +200,4 @@ export async function commitBatch(
     `Forge-Batch: ${batch.index}`,
     `Forge-Tasks: ${ids}`,
   ]);
-}
-
-export type DevOptions = {
-  io: IO;
-  skillsDir?: string;
-  /** Needed when the arena is on: one runner per candidate worktree (4.14). */
-  makeRunner?: RunnerFactory;
-};
-
-/**
- * The plain Dev stage (DESIGN 4.6, 4.7): creates the branch, then runs each batch and
- * commits it locally. Never pushes. The review loop that decides when a batch is
- * approved is wired around `runDevBatch` and `commitBatch` (T21).
- */
-export function createDevStage(options: DevOptions): StageFn {
-  return async (ctx) => {
-    const { list } = await gatherInputs(ctx, options.skillsDir);
-    // The arena is on by default; a trivial task and `candidates: 1` run a plain Dev (3.2).
-    const arena = ctx.config.dev.arena.candidates > 1 && ctx.size !== 'trivial';
-    if (arena && !options.makeRunner) {
-      throw new Error(
-        'o arena está ligado, mas o Dev não recebeu uma fábrica de runners',
-      );
-    }
-    const branch = await ensureBranch(ctx.cwd, ctx.run);
-    options.io.write(
-      `Dev na branch ${branch}${arena ? ` (arena com ${ctx.config.dev.arena.candidates} candidatos)` : ''}.`,
-    );
-    const done = await committedBatches(ctx.cwd, ctx.run);
-    for (const batch of splitBatches(list.tasks, ctx.config.review_mode)) {
-      if (done.has(batch.index)) continue;
-      if (arena && options.makeRunner) {
-        await runArena(ctx, batch, {
-          makeRunner: options.makeRunner,
-          io: options.io,
-          ...(options.skillsDir ? { skillsDir: options.skillsDir } : {}),
-        });
-      } else {
-        await runDevBatch(
-          ctx,
-          batch,
-          options.skillsDir ? { skillsDir: options.skillsDir } : {},
-        );
-      }
-      const hash = await commitBatch(ctx, batch);
-      if (hash === null)
-        options.io.write(
-          `Lote ${batch.index}: o Dev não mudou nada, sem commit.`,
-        );
-      else
-        options.io.write(
-          `Lote ${batch.index} commitado (${hash.slice(0, 7)}).`,
-        );
-    }
-  };
 }

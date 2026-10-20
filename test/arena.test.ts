@@ -283,3 +283,16 @@ describe('arena', () => {
     });
   });
 });
+
+describe('arena models', () => {
+  it('falls back to the Dev model and runner when dev.arena.models is not set', async () => {
+    const s = await setup({
+      yml: 'steps:\n  dev: { runner: claude-cli, model: m-dev }\ndev:\n  allowed_commands: [node --version]\n',
+    });
+    await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    for (const call of s.factoryCalls) {
+      expect(call.model).toBe('m-dev');
+      expect(call.runner).toBe('claude-cli');
+    }
+  });
+});

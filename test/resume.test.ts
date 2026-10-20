@@ -86,7 +86,7 @@ describe('resume', () => {
       stubStages(),
     );
     expect(result.status).toBe('completed');
-    expect(result.stagesRun).toEqual(['approve', 'dev', 'review', 'lessons']);
+    expect(result.stagesRun).toEqual(['approve', 'build', 'lessons']);
     expect(second.calls.map((c) => c.prompt.split('\n')[0])).toEqual([
       'stage:dev',
       'stage:review',

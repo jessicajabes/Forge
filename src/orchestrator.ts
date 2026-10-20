@@ -3,14 +3,17 @@ import { readState, writeState } from './state.js';
 import type { Run } from './runs.js';
 import type { Runner } from './runner.js';
 
-/** The stages of DESIGN section 1, plus the human stop of 4.10 between Tasks and Dev. */
+/**
+ * The stages of DESIGN section 1, plus the human stop of 4.10 between Tasks and Dev.
+ * `build` is Dev and Review together: the loop over batches of 4.7, where each batch
+ * goes Dev, Review, correction cycles, and a local commit once approved.
+ */
 export const PIPELINE = [
   'grill',
   'recon',
   'tasks',
   'approve',
-  'dev',
-  'review',
+  'build',
   'lessons',
 ] as const;
 export type StageName = (typeof PIPELINE)[number];

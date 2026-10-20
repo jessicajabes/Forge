@@ -49,10 +49,12 @@ export function stubStages(): Stages {
       }),
     }),
     approve: async () => undefined,
-    dev: stage('dev', { canEdit: true }),
-    review: stage('review', {
-      artifact: (ctx) => ({ path: inRun(ctx, 'review.md') }),
-    }),
+    build: async (ctx) => {
+      await stage('dev', { canEdit: true })(ctx);
+      await stage('review', {
+        artifact: (c) => ({ path: inRun(c, 'review.md') }),
+      })(ctx);
+    },
     lessons: stage('lessons', {
       artifact: (ctx) => ({ path: join(workflowDir(ctx.cwd), 'lessons.md') }),
     }),

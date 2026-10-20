@@ -200,10 +200,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/review.ts` (novo), `test/review.test.ts` (novo)
 - **O que fazer**: Disparar um revisor por modelo em paralelo, uma síntese com JSON validado e os quatro grupos, e escrever o `review.md` (4.13, 6.1). Reprovar com `act_on` ou `consider` e voltar ao Dev. Respeitar o limite de 3 ciclos e escalar direto ao humano quando um `act_on` for mantido.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para aprovação, reprovação e retorno ao Dev, limite de ciclos e escalada de `act_on` mantido
-  - [ ] Teste confirma que `noted` e `dismissed` não voltam ao Dev
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para aprovação, reprovação e retorno ao Dev, limite de ciclos e escalada de `act_on` mantido
+  - [x] Teste confirma que `noted` e `dismissed` não voltam ao Dev
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T13, T19
 
 ## T22: Adaptar a skill `lessons`
