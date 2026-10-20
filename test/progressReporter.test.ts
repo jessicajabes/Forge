@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createProgressWriter, PROGRESS_FILE } from '../src/progress.js';
 import { createProgressReporter } from '../src/progressReporter.js';
 import { RunnerError, RunnerTimeoutError } from '../src/runner.js';
+import type { Runner } from '../src/runner.js';
+import { runSubagents } from '../src/subagents.js';
 
 const info = {
   id: 'c1',
@@ -251,6 +253,38 @@ describe('progress reporter', () => {
     for (const footer of footers) {
       expect(footer.length).toBeLessThan(columns);
     }
+  });
+
+  it('shows the reviewer and lead calls of the review stage', async () => {
+    const { reporter, out, lines } = await setup();
+    const runner: Runner = async (req) => {
+      req.onEvent?.({ type: 'tool', name: 'Read', arg: 'src/x.ts' });
+      return 'achados';
+    };
+    const via = { runner: 'claude-cli', model: 'opus' };
+
+    await runSubagents(runner, [{ id: 'reviewer-A', prompt: 'p' }], {
+      maxParallel: 1,
+      reporter,
+      origin: 'review',
+      via,
+    });
+    await runSubagents(runner, [{ id: 'lead', prompt: 'p' }], {
+      maxParallel: 1,
+      reporter,
+      origin: 'review',
+      via,
+    });
+
+    const text = out.join('');
+    expect(text).toContain(
+      '[review · reviewer-A · claude-cli/opus] Read src/x.ts',
+    );
+    expect(text).toContain('[review · lead · claude-cli/opus] ok');
+    expect(text).toContain('modelo: opus · só leitura');
+    const written = await lines();
+    expect(written.filter((l) => l.type === 'call-start')).toHaveLength(2);
+    expect(written.filter((l) => l.type === 'call-end')).toHaveLength(2);
   });
 
   it('prints nothing with quiet but still writes progress.jsonl', async () => {
