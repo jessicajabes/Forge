@@ -47,7 +47,14 @@ type Candidate = {
   report: string;
   diff: string;
 };
-type Dropout = { index: number; reason: string };
+type Dropout = { index: number; reason: string; unchanged: boolean };
+
+/** A candidate that ended without error and without a diff; unlike a crash, it is not a failure. */
+class NoChange extends Error {
+  constructor() {
+    super('não mudou nada');
+  }
+}
 
 const verdictSchema = z.object({
   scores: z.array(
@@ -312,7 +319,7 @@ export async function runArena(
             canEdit: true,
           });
           const diff = await workingDiff(dir);
-          if (diff.trim() === '') throw new Error('não mudou nada');
+          if (diff.trim() === '') throw new NoChange();
           return {
             ok: true as const,
             candidate: { index, dir, model, report, diff },
@@ -320,7 +327,11 @@ export async function runArena(
         } catch (error) {
           return {
             ok: false as const,
-            dropout: { index, reason: (error as Error).message },
+            dropout: {
+              index,
+              reason: (error as Error).message,
+              unchanged: error instanceof NoChange,
+            },
           };
         }
       },
@@ -333,6 +344,20 @@ export async function runArena(
     );
     for (const d of dropouts)
       io.write(`Candidato ${d.index} desistiu: ${d.reason}.`);
+    if (candidates.length === 0 && dropouts.every((d) => d.unchanged)) {
+      // Every candidate ran fine and found nothing to change (a verification-only task, or
+      // work already done): not a failure, so there is nothing to judge and nothing to ask.
+      await removeWorktrees();
+      const note = `# Arena - lote ${batch.index} de ${batch.total}
+
+Nenhum candidato mudou nada: ${cfg.candidates} candidatos rodaram sem erro e a tarefa não pedia alteração.
+`;
+      await saveArtifact(join(arenaDir, 'arena.md'), note, () => undefined);
+      io.write(
+        'Nenhum candidato precisou mudar nada: seguindo sem alterações.',
+      );
+      return { note };
+    }
     if (candidates.length === 0) {
       throw new ArenaEscalation(
         'nenhum candidato entregou mudanças: a pessoa precisa decidir o que fazer.',

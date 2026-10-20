@@ -206,6 +206,18 @@ describe('arena', () => {
     );
   });
 
+  it('when every candidate ends clean with no change, it goes on without escalating', async () => {
+    const s = await setup({ candidate: async () => 'nada a fazer' });
+    const { note } = await runArena(s.ctx, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    expect(note).toContain('Nenhum candidato mudou nada');
+    expect(
+      (await git(s.ctx.cwd, ['worktree', 'list'])).split('\n'),
+    ).toHaveLength(1);
+  });
+
   it('with no survivor, escalates to the human and still removes the worktrees', async () => {
     const s = await setup({
       candidate: async () => {
