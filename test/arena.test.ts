@@ -11,6 +11,7 @@ import {
 import { parseConfig } from '../src/config.js';
 import { git } from '../src/git.js';
 import type { RunContext } from '../src/orchestrator.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner, RunnerFactory } from '../src/runner.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { splitBatches } from '../src/steps/dev.js';
@@ -287,6 +288,35 @@ describe('arena', () => {
       'candidato-2': 'm-b',
       'candidato-3': 'm-c',
     });
+  });
+});
+
+describe('arena labels', () => {
+  it('gives each candidate lines under its own number, runner and model', async () => {
+    const s = await setup({
+      yml: 'dev:\n  allowed_commands: [node --version]\n  arena:\n    models: [m-a, m-b, m-c]\n',
+    });
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    await runArena({ ...s.ctx, reporter }, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    const lines = out.join('').split('\n');
+    for (const [n, m] of [
+      [1, 'm-a'],
+      [2, 'm-b'],
+      [3, 'm-c'],
+    ] as const) {
+      const prefix = `[dev · candidato ${n} · claude-cli/${m}]`;
+      expect(
+        lines.filter((l) => l.startsWith(prefix)).length,
+      ).toBeGreaterThanOrEqual(2);
+    }
   });
 });
 

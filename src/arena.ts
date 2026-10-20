@@ -14,7 +14,13 @@ import type { IO } from './io.js';
 import type { RunContext } from './orchestrator.js';
 import type { RunnerFactory } from './runner.js';
 import { loadReference, loadSkill } from './skills.js';
-import { assertAllOk, mapLimit, runSubagents } from './subagents.js';
+import {
+  assertAllOk,
+  labelRunner,
+  mapLimit,
+  originLabel,
+  runSubagents,
+} from './subagents.js';
 import { buildDevPrompt, gatherInputs, type Batch } from './steps/dev.js';
 
 const execFileAsync = promisify(execFile);
@@ -141,6 +147,10 @@ export async function runArena(
     .map((t) => inputs.blocks.get(t.id) ?? `## T${t.id}: ${t.title}`)
     .join('\n\n');
   const allowed = safeCommands(ctx.config.dev.allowed_commands);
+  const devVia = {
+    runner: ctx.config.steps.dev.runner,
+    model: ctx.config.steps.dev.model,
+  };
   const worktrees: string[] = [];
   // Idempotent: it runs before the checks and again in `finally`, which also covers failures
   const removeWorktrees = async () => {
@@ -171,7 +181,12 @@ export async function runArena(
           },
         },
       ],
-      { maxParallel: 1 },
+      {
+        maxParallel: 1,
+        reporter: ctx.reporter,
+        origin: 'dev',
+        via: devVia,
+      },
     );
     const rubric =
       assertAllOk(rubricResult ? [rubricResult] : [])[0]?.text ?? '';
@@ -204,12 +219,18 @@ export async function runArena(
           await rm(dir, { recursive: true, force: true });
           await addWorktree(ctx.cwd, dir);
           worktrees.push(dir);
-          const runner = deps.makeRunner({
-            cwd: dir,
-            runner: ctx.config.steps.dev.runner,
-            ...(model ? { model } : {}),
-            allowedCommands: allowed,
-          });
+          const candidateVia = { runner: devVia.runner, model };
+          const runner = labelRunner(
+            deps.makeRunner({
+              cwd: dir,
+              runner: ctx.config.steps.dev.runner,
+              ...(model ? { model } : {}),
+              allowedCommands: allowed,
+            }),
+            ctx.reporter,
+            originLabel(['dev', `candidato ${index}`], candidateVia),
+            candidateVia,
+          );
           const report = await runner({
             prompt: devPrompt,
             files: [],
@@ -281,7 +302,12 @@ export async function runArena(
             validate: parseVerdict,
           },
         ],
-        { maxParallel: 1 },
+        {
+          maxParallel: 1,
+          reporter: ctx.reporter,
+          origin: 'dev',
+          via: cfg.judge ?? devVia,
+        },
       );
       let verdict: Verdict | null = null;
       if (judged?.ok) {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner } from '../src/runner.js';
 import {
   SubagentEscalation,
   assertAllOk,
+  labelRunner,
   runSubagents,
 } from '../src/subagents.js';
 
@@ -137,5 +139,59 @@ describe('assertAllOk', () => {
       expect(escalation.failed.map((f) => f.id)).toEqual(['bad']);
       expect(escalation.completed.map((c) => c.text)).toEqual(['resposta']);
     }
+  });
+});
+
+describe('runSubagents labels', () => {
+  const makeReporter = (out: string[]) =>
+    createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+
+  it('gives each parallel subagent lines that carry its own label', async () => {
+    const out: string[] = [];
+    const runner: Runner = async (req) => {
+      const who = req.prompt.replace('task:', '');
+      await tick();
+      req.onEvent?.({ type: 'tool', name: 'Read', arg: `src/${who}.ts` });
+      await tick();
+      return who;
+    };
+    const results = await runSubagents(runner, [spec('a'), spec('b')], {
+      maxParallel: 2,
+      reporter: makeReporter(out),
+      origin: 'recon',
+      via: { runner: 'claude-cli', model: 'sonnet' },
+    });
+    expect(results.every((r) => r.ok)).toBe(true);
+    const lines = out.join('').split('\n');
+    for (const id of ['a', 'b']) {
+      const label = `[recon · ${id} · claude-cli/sonnet]`;
+      const mine = lines.filter((l) => l.startsWith(label));
+      expect(mine.some((l) => l.includes(`Read src/${id}.ts`))).toBe(true);
+      expect(mine.length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('shows the CLI default when there is no model', async () => {
+    const out: string[] = [];
+    const runner: Runner = async (req) => {
+      req.onEvent?.({ type: 'tool', name: 'Read', arg: 'x.ts' });
+      return 'ok';
+    };
+    await runSubagents(runner, [spec('a')], {
+      maxParallel: 1,
+      reporter: makeReporter(out),
+      origin: 'recon',
+      via: { runner: 'claude-cli' },
+    });
+    expect(out.join('')).toContain('[recon · a · claude-cli/padrão do CLI]');
+  });
+
+  it('leaves the runner alone without a reporter', () => {
+    const runner: Runner = async () => 'x';
+    expect(labelRunner(runner, undefined, 'x')).toBe(runner);
   });
 });
