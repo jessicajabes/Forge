@@ -20,7 +20,9 @@ The explorers each investigated a different angle of the same project. Their fin
 
 If the explorer findings above are empty, nobody explored before you. Explore the project yourself, covering structure and stack, conventions and tooling, and runtime flow and boundaries.
 
-Write a file an engineer unfamiliar with this project could read and walk away with a solid mental model, and with what they need to make a change that fits in. Keep it short enough to be read in full before every task: about 1,500 words.
+Write the context an engineer unfamiliar with this project could read and walk away with a solid mental model, and with what they need to make a change that fits in. Keep it short enough to be read in full before every task: about 1,500 words.
+
+You cannot create or edit files. Your reply is the context file: the Forge saves it exactly as you write it, as `.workflow/context.md`. Reply with the Markdown only, starting at the `# Project:` title. Do not apologize, explain, or add any text before or after it, and do not wrap it in a code fence.
 
 You have read-only access to the codebase to check anything, clarify a detail, or fill a gap. Use Read, Grep, and Glob as needed. Never read or quote `.env` files, credentials, or other secrets. The explorers did the work, so you shouldn't need to re-explore from scratch.
 

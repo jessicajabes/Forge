@@ -104,6 +104,34 @@ describe('recon', () => {
     expect(fake.calls[1]?.prompt).toContain('inválida');
   });
 
+  it('rejects an answer that apologizes before the markdown instead of saving it', async () => {
+    const cwd = await makeRepo();
+    const apology = `I could not write the file. The content is below.\n\n${CONTEXT}`;
+    const fake = createFakeRunner([apology, CONTEXT]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(fake.calls).toHaveLength(2);
+    expect(await readFile(join(ctx.run.dir, 'context.md'), 'utf-8')).toBe(
+      CONTEXT,
+    );
+  });
+
+  it('saves the shared .workflow/context.md and copies it into the run folder', async () => {
+    const cwd = await makeRepo();
+    const fake = createFakeRunner([CONTEXT]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(await readFile(join(cwd, '.workflow', 'context.md'), 'utf-8')).toBe(
+      CONTEXT,
+    );
+    const meta = JSON.parse(
+      await readFile(join(cwd, '.workflow', 'context.json'), 'utf-8'),
+    ) as { commit: string };
+    expect(meta.commit).toBe(
+      execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim(),
+    );
+  });
+
   it('escalates after three malformed answers', async () => {
     const cwd = await makeRepo();
     const fake = createFakeRunner(['a', 'b', 'c']);
@@ -114,23 +142,98 @@ describe('recon', () => {
   });
 });
 
-describe('recon on a trivial task', () => {
-  async function withPreviousContext(daysAgo: number): Promise<string> {
-    const cwd = await makeRepo();
-    const old = await createRun(
-      cwd,
-      'anterior',
-      new Date('2026-01-01T00:00:00Z'),
-    );
-    const path = join(old.dir, 'context.md');
-    await writeFile(path, CONTEXT);
-    const when = new Date(Date.now() - daysAgo * 86_400_000);
-    await utimes(path, when, when);
-    return cwd;
-  }
+async function commitFile(
+  cwd: string,
+  file: string,
+  message = 'change',
+): Promise<void> {
+  await mkdir(join(cwd, file, '..'), { recursive: true });
+  await writeFile(join(cwd, file), `${Date.now()}${Math.random()}\n`);
+  execFileSync('git', ['add', '-f', file], { cwd });
+  execFileSync('git', ['commit', '-q', '-m', message], { cwd });
+}
 
-  it('reuses the last context.md, copies it and says how old it is, with no model call', async () => {
-    const cwd = await withPreviousContext(3);
+/** A repo with a shared context built at the current HEAD, `daysAgo` days ago. */
+async function withSharedContext(daysAgo: number): Promise<string> {
+  const cwd = await makeRepo();
+  const fake = createFakeRunner([CONTEXT]);
+  await createReconStage({ io: createFakeIO([]) })(
+    await ctxFor(cwd, 'complete', fake.runner),
+  );
+  const when = new Date(Date.now() - daysAgo * 86_400_000);
+  await utimes(join(cwd, '.workflow', 'context.md'), when, when);
+  return cwd;
+}
+
+describe('recon reuses the shared context across runs', () => {
+  it('a full run reuses it when the repo did not change', async () => {
+    const cwd = await withSharedContext(2);
+    const fake = createFakeRunner([]);
+    const io = createFakeIO([]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io })(ctx);
+    expect(fake.calls).toHaveLength(0);
+    expect(await readFile(join(ctx.run.dir, 'context.md'), 'utf-8')).toBe(
+      CONTEXT,
+    );
+    expect(io.output()).toContain('o repo não mudou');
+  });
+
+  it('a full run rebuilds it after a commit of someone else that touches code', async () => {
+    const cwd = await withSharedContext(2);
+    await commitFile(cwd, 'src/novo.ts');
+    const fake = createFakeRunner([CONTEXT]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("a full run keeps it after the Forge's own commits", async () => {
+    const cwd = await withSharedContext(2);
+    await commitFile(
+      cwd,
+      'src/feito.ts',
+      'forge: T1 - algo\n\nForge-Run: 2026-01-01-x\nForge-Batch: 1',
+    );
+    const fake = createFakeRunner([]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('a full run keeps it after a commit that only touches .workflow/', async () => {
+    const cwd = await withSharedContext(2);
+    await commitFile(cwd, '.workflow/lessons.md');
+    const fake = createFakeRunner([]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('rebuilds when the commit it was built from no longer exists', async () => {
+    const cwd = await withSharedContext(2);
+    await writeFile(
+      join(cwd, '.workflow', 'context.json'),
+      JSON.stringify({ commit: '0'.repeat(40) }),
+    );
+    const fake = createFakeRunner([CONTEXT]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('--refresh-context rebuilds it even when nothing changed', async () => {
+    const cwd = await withSharedContext(1);
+    const fake = createFakeRunner([CONTEXT]);
+    const ctx = await ctxFor(cwd, 'complete', fake.runner);
+    await createReconStage({ io: createFakeIO([]), refreshContext: true })(ctx);
+    expect(fake.calls).toHaveLength(1);
+  });
+});
+
+describe('recon on a trivial task', () => {
+  it('reuses the shared context and says how old it is, with no model call', async () => {
+    const cwd = await withSharedContext(3);
     const fake = createFakeRunner([]);
     const io = createFakeIO([]);
     const ctx = await ctxFor(cwd, 'trivial', fake.runner);
@@ -142,7 +245,18 @@ describe('recon on a trivial task', () => {
     expect(io.output()).toContain('contexto de 3 dias atrás');
   });
 
-  it('builds a new one when there is no earlier context', async () => {
+  it('reuses it even when the repo changed, and warns about it', async () => {
+    const cwd = await withSharedContext(3);
+    await commitFile(cwd, 'src/novo.ts');
+    const fake = createFakeRunner([]);
+    const io = createFakeIO([]);
+    const ctx = await ctxFor(cwd, 'trivial', fake.runner);
+    await createReconStage({ io })(ctx);
+    expect(fake.calls).toHaveLength(0);
+    expect(io.output()).toContain('o repo mudou');
+  });
+
+  it('builds a new one when there is no shared context yet', async () => {
     const cwd = await makeRepo();
     const fake = createFakeRunner([CONTEXT]);
     const ctx = await ctxFor(cwd, 'trivial', fake.runner);
@@ -150,19 +264,11 @@ describe('recon on a trivial task', () => {
     expect(fake.calls).toHaveLength(1);
   });
 
-  it('--refresh-context rebuilds it even when an earlier one exists', async () => {
-    const cwd = await withPreviousContext(1);
+  it('--refresh-context rebuilds it even when a shared one exists', async () => {
+    const cwd = await withSharedContext(1);
     const fake = createFakeRunner([CONTEXT]);
     const ctx = await ctxFor(cwd, 'trivial', fake.runner);
     await createReconStage({ io: createFakeIO([]), refreshContext: true })(ctx);
-    expect(fake.calls).toHaveLength(1);
-  });
-
-  it('a full run rebuilds the context every time', async () => {
-    const cwd = await withPreviousContext(1);
-    const fake = createFakeRunner([CONTEXT]);
-    const ctx = await ctxFor(cwd, 'complete', fake.runner);
-    await createReconStage({ io: createFakeIO([]) })(ctx);
     expect(fake.calls).toHaveLength(1);
   });
 });
