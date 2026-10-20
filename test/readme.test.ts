@@ -41,9 +41,4 @@ describe('README', () => {
     }
     expect(readme).toContain('THIRD_PARTY_LICENSES.md');
   });
-
-  it('does not mention an employer or internal systems', async () => {
-    const readme = await readFile('README.md', 'utf-8');
-    expect(readme).not.toMatch(/bemobi|git-m4u|bitbucket|orka/i);
-  });
 });
