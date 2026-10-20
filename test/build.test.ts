@@ -75,7 +75,7 @@ const commitsAhead = (cwd: string) =>
 
 describe('build stage', () => {
   it('works on a branch forge/<slug> and makes one commit for the whole run in final mode', async () => {
-    const { ctx, edits } = await setup();
+    const { ctx, edits } = await setup('review_mode: final');
     await stage()(ctx);
     expect(await currentBranch(ctx.cwd)).toBe('forge/adicionar-coisas');
     expect(edits).toEqual([true]);
@@ -164,7 +164,7 @@ describe('build stage', () => {
 });
 
 describe('build stage with dev.batching per_task and the review at the end', () => {
-  const yml = 'dev: { batching: per_task }';
+  const yml = 'review_mode: final\ndev: { batching: per_task }';
   const finding = (title: string, taskId: string) => ({
     task: taskId,
     title,

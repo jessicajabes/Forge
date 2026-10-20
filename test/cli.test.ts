@@ -229,7 +229,7 @@ describe('forge-jj', () => {
     await main(['x'], asked.d);
     expect(asked.io.output()).toContain('Qual o tamanho da tarefa?');
     expect(asked.io.output()).toContain('Como revisar?');
-    expect(asked.s.configs[0]?.review_mode).toBe('final');
+    expect(asked.s.configs[0]?.review_mode).toBe('per_task');
   });
 
   it('--review per_task and --no-arena change the config the run uses', async () => {
