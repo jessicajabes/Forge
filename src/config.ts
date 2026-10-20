@@ -10,7 +10,7 @@ export class ConfigError extends Error {
   }
 }
 
-const runnerName = z.enum(['claude-cli', 'copilot-cli']);
+const runnerName = z.enum(['claude-cli', 'copilot-cli', 'antigravity-cli']);
 export type RunnerName = z.infer<typeof runnerName>;
 
 const stepConfig = z
