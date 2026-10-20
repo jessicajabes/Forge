@@ -53,11 +53,15 @@ export function taskBlocks(markdown: string): Map<number, string> {
  */
 export async function ensureBranch(cwd: string, run: Run): Promise<string> {
   const current = await currentBranch(cwd);
-  if (current?.startsWith('forge/')) return current;
   const stored = (await readState(run.dir))?.branch;
   if (stored) {
-    await checkout(cwd, stored, !(await branchExists(cwd, stored)));
+    if (current !== stored)
+      await checkout(cwd, stored, !(await branchExists(cwd, stored)));
     return stored;
+  }
+  if (current?.startsWith('forge/')) {
+    await saveBranch(run.dir, current);
+    return current;
   }
   // runs started before the creative name: forge/<slug> holding this run's commits
   const legacy = `forge/${run.slug}`;

@@ -45,6 +45,7 @@ const lead = (o: {
   dismissed?: object[];
   previous_items?: object[];
   verdict?: string;
+  reviewers?: object[];
 }) =>
   JSON.stringify({
     verdict: 'rejected',
@@ -400,6 +401,57 @@ describe('reviewBatch', () => {
       /### T1\n#### m-a\n- \(ciclo 1, agir\) falha-um[^\n]*\n#### m-b\n- \(ciclo 1, anotado\) nota-um[^\n]*\n### T2\n#### m-b\n- \(ciclo 1, agir\) falha-dois/,
     );
     expect(section).not.toMatch(/#### m-a\n- [^\n]*falha-dois/);
+  });
+
+  it('keeps the configured model over the one the lead reports', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [item('falha-um', { task: 'T1', raised_by: ['A'] })],
+          reviewers: [{ label: 'A', model: 'inventado', findings: 1 }],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('#### m-a\n');
+    expect(report).not.toContain('#### inventado');
+  });
+
+  it('names the reviewer by the reported model, then by the runner, when the config has no model', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: "" }\n      - { runner: copilot-cli, model: "" }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [
+            item('falha-um', { raised_by: ['A'] }),
+            item('falha-dois', { raised_by: ['B'] }),
+          ],
+          reviewers: [{ label: 'A', model: 'inventado', findings: 1 }],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    const inner = s.deps.makeRunner;
+    s.deps.makeRunner = (o) => {
+      const r = inner(o);
+      return (req) => {
+        if (o.runner === 'claude-cli')
+          req.onEvent?.({ type: 'model', model: 'real-model' });
+        return r(req);
+      };
+    };
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('#### real-model\n');
+    expect(report).toContain('#### copilot-cli\n');
+    expect(report).not.toContain('#### inventado');
   });
 
   it('escalates when the lead answers badly three times', async () => {

@@ -1,6 +1,29 @@
 const PREFIX = 'forge/';
 
-const WORDS = [
+const ADJECTIVES = [
+  'agil',
+  'bravo',
+  'calmo',
+  'dourado',
+  'esperto',
+  'feliz',
+  'gentil',
+  'habil',
+  'inquieto',
+  'jovem',
+  'leve',
+  'macio',
+  'nobre',
+  'otimo',
+  'pacato',
+  'quieto',
+  'rapido',
+  'sereno',
+  'tenaz',
+  'unico',
+];
+
+const NOUNS = [
   'aurora',
   'bambu',
   'cometa',
@@ -11,9 +34,8 @@ const WORDS = [
   'horizonte',
   'ilhota',
   'jacaranda',
-  'kiwi',
   'lume',
-  'maré',
+  'mare',
   'nebulosa',
   'oasis',
   'pulsar',
@@ -27,11 +49,10 @@ const WORDS = [
   'brasa',
   'cedro',
   'duna',
-  'ember',
   'fenix',
   'geada',
   'helice',
-].map((word) => word.normalize('NFD').replace(/[̀-ͯ]/g, ''));
+];
 
 /** FNV-1a 32-bit hash: small, stable across processes and Node versions. */
 function hash(text: string): number {
@@ -50,8 +71,9 @@ function hash(text: string): number {
  */
 export function branchName(runId: string, existing: readonly string[]): string {
   const h = hash(runId);
-  const first = WORDS[h % WORDS.length] ?? 'forge';
-  const second = WORDS[Math.floor(h / WORDS.length) % WORDS.length] ?? 'run';
+  const first = ADJECTIVES[h % ADJECTIVES.length] ?? 'forge';
+  const second =
+    NOUNS[Math.floor(h / ADJECTIVES.length) % NOUNS.length] ?? 'run';
   const base = `${PREFIX}${first}-${second}`;
   const taken = new Set(existing);
   if (!taken.has(base)) return base;

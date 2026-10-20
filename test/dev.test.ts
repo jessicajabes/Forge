@@ -71,9 +71,21 @@ describe('ensureBranch', () => {
     expect(await currentBranch(cwd)).toBe(first);
   });
 
-  it('keeps a forge/* branch that is already checked out', async () => {
+  it('keeps a forge/* branch already checked out and records it in state.json', async () => {
     const { cwd, run } = await setup();
     await checkout(cwd, 'forge/outra', true);
     expect(await ensureBranch(cwd, run)).toBe('forge/outra');
+    expect((await readState(run.dir))?.branch).toBe('forge/outra');
+    await checkout(cwd, 'feature/x');
+    expect(await ensureBranch(cwd, run)).toBe('forge/outra');
+    expect(await currentBranch(cwd)).toBe('forge/outra');
+  });
+
+  it('the stored branch wins over another forge/* branch checked out', async () => {
+    const { cwd, run } = await setup();
+    const first = await ensureBranch(cwd, run);
+    await checkout(cwd, 'forge/outra', true);
+    expect(await ensureBranch(cwd, run)).toBe(first);
+    expect(await currentBranch(cwd)).toBe(first);
   });
 });

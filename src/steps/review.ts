@@ -4,7 +4,7 @@ import { parseSpec, saveArtifact } from '../artifacts.js';
 import { workingDiff, workingDiffStat } from '../git.js';
 import type { IO } from '../io.js';
 import type { RunContext } from '../orchestrator.js';
-import type { RunnerFactory } from '../runner.js';
+import type { Runner, RunnerFactory } from '../runner.js';
 import { readReference, loadSkill } from '../skills.js';
 import { assertAllOk, runSubagents } from '../subagents.js';
 import { gatherInputs, type Batch } from './dev.js';
@@ -313,11 +313,22 @@ export async function reviewBatch(
     // 1. Reviewers, one per model, in parallel.
     const results = await Promise.all(
       reviewerConfigs.map(async (cfg, i) => {
-        const runner = deps.makeRunner({
+        const base = deps.makeRunner({
           cwd: ctx.cwd,
           runner: cfg.runner,
           ...(cfg.model ? { model: cfg.model } : {}),
         });
+        // The model the CLI says it ran, when the provider reports one.
+        let reported = '';
+        const runner: Runner = (req) =>
+          base({
+            ...req,
+            onEvent: (event) => {
+              if (event.type === 'model') reported = event.model;
+              req.onEvent?.(event);
+            },
+          });
+        if (base.limitFor) runner.limitFor = base.limitFor;
         // One pass with a function: inserted text is never re-scanned for tokens
         // and `$&` / `$'` in it are not replacement patterns.
         const values: Record<string, string> = {
@@ -342,12 +353,18 @@ export async function reviewBatch(
             via: { runner: cfg.runner, model: cfg.model || undefined },
           },
         );
-        return { label: label(i), model: cfg.model, result: r };
+        // Config first, then what the runner reported, then the runner name.
+        return {
+          label: label(i),
+          model: cfg.model || reported || cfg.runner,
+          configured: cfg.model,
+          result: r,
+        };
       }),
     );
     const reviewerTexts = results.map((r) => {
       const ok = assertAllOk(r.result ? [r.result] : []);
-      return `### Reviewer ${r.label}${r.model ? ` (${r.model})` : ''}\n\n${ok[0]?.text ?? ''}`;
+      return `### Reviewer ${r.label}${r.configured ? ` (${r.configured})` : ''}\n\n${ok[0]?.text ?? ''}`;
     });
 
     // 2. The lead sorts the findings.
@@ -388,8 +405,11 @@ export async function reviewBatch(
       dismissed: verdict.dismissed,
       previous: verdict.previous_items,
       models: Object.fromEntries([
+        // The lead's name is only a last resort, and is marked as such.
+        ...verdict.reviewers.map(
+          (r) => [r.label, `${r.model} (informado pelo líder)`] as const,
+        ),
         ...results.map((r) => [r.label, r.model] as const),
-        ...verdict.reviewers.map((r) => [r.label, r.model] as const),
       ]),
     };
     cycles.push(cycle);
