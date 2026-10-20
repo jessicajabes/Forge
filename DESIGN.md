@@ -449,3 +449,5 @@ forge/
 5. ~~Antes de escrever o runner `claude-cli`, validar as flags que isolam o `claude -p`~~ Feito em 2026-10-19 (T1); resultado na seção 9.
 6. Montar o conjunto de tarefas de referência em `test/manual/` (seção 7) e medir o arena contra o Dev simples e o `claude` direto.
 7. Checar com o empregador a questão de propriedade intelectual e confirmar os termos do GitHub. Só então criar o remoto no GitHub pessoal (com confirmação) e publicar no npm.
+   - **Feito em 2026-10-20 (histórico):** sem chaves, sem `.env` e sem menção ao empregador no código. O commit `8c3ae02` tem o e-mail corporativo da autora como autor e já está no `origin/main`; a autora aceitou deixar assim (projeto pessoal que ela vai usar no trabalho).
+   - **Pendente:** a checagem de IP com o empregador e a leitura dos termos do GitHub para o `copilot-cli`. Só depois disso se publica no npm.

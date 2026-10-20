@@ -273,5 +273,5 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Critério de aceite**:
   - [x] Cada `SKILL.md` com `adapted: true` tem `source` e consta em `THIRD_PARTY_LICENSES.md`
   - [ ] A seção 11 registra a data e o resultado da checagem de IP e dos termos do GitHub
-  - [ ] Nenhuma chave, `.env` ou menção a empregador no histórico a publicar
+  - [x] Nenhuma chave, `.env` ou menção a empregador no histórico a publicar
 - **Depende de**: T26, T27
