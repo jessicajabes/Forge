@@ -277,13 +277,20 @@ export async function reviewBatch(
           runner: cfg.runner,
           ...(cfg.model ? { model: cfg.model } : {}),
         });
-        const prompt = reviewerTemplate
-          .replace('{INTENT}', intent)
-          .replace('{DIFF_OR_FILES}', `\`\`\`diff\n${diff}\n\`\`\``)
-          .replace('{RUBRIC_CONTENTS}', rubric)
-          .replace('{CODE_QUALITY_CONTENTS}', quality)
-          .replace('{LESSONS}', lessons)
-          .replace('{PREVIOUS_CYCLE}', previousBlock || '(first cycle)');
+        // One pass with a function: inserted text is never re-scanned for tokens
+        // and `$&` / `$'` in it are not replacement patterns.
+        const values: Record<string, string> = {
+          INTENT: intent,
+          DIFF_OR_FILES: `\`\`\`diff\n${diff}\n\`\`\``,
+          RUBRIC_CONTENTS: rubric,
+          CODE_QUALITY_CONTENTS: quality,
+          LESSONS: lessons,
+          PREVIOUS_CYCLE: previousBlock || '(first cycle)',
+        };
+        const prompt = reviewerTemplate.replace(
+          /\{(INTENT|DIFF_OR_FILES|RUBRIC_CONTENTS|CODE_QUALITY_CONTENTS|LESSONS|PREVIOUS_CYCLE)\}/g,
+          (_match, key: string) => values[key] ?? '',
+        );
         const [r] = await runSubagents(
           runner,
           [{ id: `reviewer-${label(i)}`, prompt }],

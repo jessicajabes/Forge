@@ -174,6 +174,16 @@ describe('reviewBatch', () => {
     );
   });
 
+  it('inserts the diff literally, without expanding $& or repeated tokens', async () => {
+    const s = await setup([APPROVED]);
+    await writeFile(
+      join(s.ctx.cwd, 'change.txt'),
+      'custo $& e o texto {LESSONS}\n',
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(s.reviewerPrompts[0]).toContain('custo $& e o texto {LESSONS}');
+  });
+
   it('rejects, sends the numbered items to the Dev, and approves in the next cycle', async () => {
     const s = await setup([
       lead({ act_on: [item('Sem validação')], consider: [item('Nome ruim')] }),
