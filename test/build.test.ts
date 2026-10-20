@@ -3,9 +3,11 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runChecks } from '../src/arena.js';
 import { parseConfig } from '../src/config.js';
 import { currentBranch, git } from '../src/git.js';
 import type { RunContext } from '../src/orchestrator.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner, RunnerFactory } from '../src/runner.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { createBuildStage } from '../src/steps/build.js';
@@ -275,4 +277,36 @@ describe('build stage with dev.batching per_task and the review at the end', () 
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('Batch 3 of 3');
   });
+});
+
+describe('build command progress lines', () => {
+  it('emits [build] start and end lines with the duration, and not the raw output', async () => {
+    const out: string[] = [];
+    const events: string[] = [];
+    let tick = 0;
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event.type);
+      },
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    const results = await runChecks(
+      process.cwd(),
+      ['node --version', 'node --no-such-flag'],
+      reporter,
+      () => (tick += 42_000),
+    );
+    expect(results.map((r) => r.ok)).toEqual([true, false]);
+    expect(out.join('')).toBe(
+      [
+        '[build] node --version',
+        '[build] ok em 42s',
+        '[build] node --no-such-flag',
+        '[build] erro em 42s',
+        '',
+      ].join('\n'),
+    );
+    expect(events).toEqual(['step', 'step', 'step', 'step']);
+  }, 20_000);
 });

@@ -12,6 +12,7 @@ import {
 } from './git.js';
 import type { IO } from './io.js';
 import type { RunContext } from './orchestrator.js';
+import type { ProgressReporter } from './progressReporter.js';
 import type { RunnerFactory } from './runner.js';
 import { loadReference, loadSkill } from './skills.js';
 import {
@@ -99,11 +100,30 @@ function renderCandidates(candidates: Candidate[]): string {
 export async function runChecks(
   cwd: string,
   commands: string[],
+  reporter?: ProgressReporter,
+  now: () => number = Date.now,
 ): Promise<{ command: string; ok: boolean; detail: string }[]> {
   const results = [];
   for (const command of commands) {
     const [cmd, ...args] = command.trim().split(/\s+/);
     if (!cmd) continue;
+    // The raw output of the command is never passed on: only these two lines.
+    const started = now();
+    await reporter?.report({
+      type: 'step',
+      id: 'build',
+      label: command,
+      phase: 'start',
+    });
+    const reportEnd = (ok: boolean) =>
+      reporter?.report({
+        type: 'step',
+        id: 'build',
+        label: command,
+        phase: 'end',
+        ok,
+        ms: now() - started,
+      });
     try {
       const running = execFileAsync(cmd, args, {
         cwd,
@@ -113,8 +133,10 @@ export async function runChecks(
       // A command that reads stdin (`prettier` with no files) would wait for it until the timeout
       running.child.stdin?.end();
       await running;
+      await reportEnd(true);
       results.push({ command, ok: true, detail: 'passou' });
     } catch (error) {
+      await reportEnd(false);
       const e = error as { code?: number | string; stderr?: string };
       results.push({
         command,
@@ -353,7 +375,11 @@ export async function runArena(
     // 5. Verify the result with the project's own commands. The worktrees go first: they
     // sit inside the project, so lint and the tests would read every copy of the code.
     await removeWorktrees();
-    const checks = await runChecks(ctx.cwd, ctx.config.dev.check_commands);
+    const checks = await runChecks(
+      ctx.cwd,
+      ctx.config.dev.check_commands,
+      ctx.reporter,
+    );
     const checksText =
       checks.length === 0
         ? 'nenhum comando para verificar'
