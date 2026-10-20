@@ -89,6 +89,57 @@ describe('progress reporter', () => {
     expect(typeof written[0]?.at).toBe('string');
   });
 
+  it('prints no footer when stderr is not a TTY', async () => {
+    const { reporter, out } = await setup();
+
+    await reporter.trackCall(
+      { ...info, limitMs: 30 * 60 * 1000 },
+      async (onEvent) => {
+        onEvent({ type: 'inactivity', idleMs: 120_000 });
+        await reporter.report({
+          type: 'step',
+          id: 'build',
+          label: 'npm test',
+          phase: 'start',
+        });
+        reporter.pauseFooter();
+        reporter.resumeFooter();
+        return 'done';
+      },
+    );
+
+    const text = out.join('');
+    expect(text).not.toContain('\r');
+    expect(text).not.toContain('\x1b');
+    expect(text).not.toContain('/30m');
+  });
+
+  it('draws and erases the footer in place on a TTY', async () => {
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns: 80 },
+      env: {},
+      now: () => 0,
+    });
+
+    await reporter.trackCall(
+      { ...info, label: 'candidato 1', limitMs: 30 * 60 * 1000 },
+      async () => {
+        // Let the start line and the footer be drawn before the "question".
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        reporter.pauseFooter();
+        out.push('<ask>');
+        reporter.resumeFooter();
+        return 'done';
+      },
+    );
+
+    const text = out.join('');
+    expect(text).toContain('candidato 1 0s/30m');
+    expect(text.indexOf('\r\x1b[2K<ask>')).toBeGreaterThan(-1);
+  });
+
   it('prints nothing with quiet but still writes progress.jsonl', async () => {
     const { reporter, out, lines } = await setup(true);
 
