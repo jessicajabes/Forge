@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { saveArtifact } from './artifacts.js';
@@ -79,6 +79,42 @@ function parseVerdict(text: string): Verdict {
 /** The arena gives candidates the project's allowed commands, never git worktree or push (DESIGN 4.6). */
 export function safeCommands(commands: string[]): string[] {
   return commands.filter((c) => !/^\s*git\s+(worktree|push)\b/.test(c));
+}
+
+/** Start and end lines for one worktree operation. The end line carries the outcome and the time. */
+async function withWorktreeLines<T>(
+  reporter: ProgressReporter | undefined,
+  id: string,
+  action: 'create' | 'remove',
+  label: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  await reporter?.report({
+    type: 'worktree',
+    id,
+    label,
+    action,
+    phase: 'start',
+  });
+  const end = (ok: boolean) =>
+    reporter?.report({
+      type: 'worktree',
+      id,
+      label,
+      action,
+      phase: 'end',
+      ok,
+      ms: Date.now() - started,
+    });
+  try {
+    const result = await work();
+    await end(true);
+    return result;
+  } catch (error) {
+    await end(false);
+    throw error;
+  }
 }
 
 const MAX_DIFF_CHARS = 60_000;
@@ -177,8 +213,17 @@ export async function runArena(
   // Idempotent: it runs before the checks and again in `finally`, which also covers failures
   const removeWorktrees = async () => {
     for (const dir of worktrees.splice(0)) {
-      await removeWorktree(ctx.cwd, dir);
-      await rm(dir, { recursive: true, force: true });
+      const name = basename(dir);
+      await withWorktreeLines(
+        ctx.reporter,
+        `arena · ${name.replace('-', ' ')}`,
+        'remove',
+        `remover worktree ${name}`,
+        async () => {
+          await removeWorktree(ctx.cwd, dir);
+          await rm(dir, { recursive: true, force: true });
+        },
+      );
     }
   };
 
@@ -237,9 +282,17 @@ export async function runArena(
           ctx.config.steps.dev.model;
         try {
           // A run that was interrupted leaves its worktrees behind, and `git worktree add` refuses a path that exists
-          await removeWorktree(ctx.cwd, dir);
-          await rm(dir, { recursive: true, force: true });
-          await addWorktree(ctx.cwd, dir);
+          await withWorktreeLines(
+            ctx.reporter,
+            `arena · candidato ${index}`,
+            'create',
+            `criar worktree candidato-${index}`,
+            async () => {
+              await removeWorktree(ctx.cwd, dir);
+              await rm(dir, { recursive: true, force: true });
+              await addWorktree(ctx.cwd, dir);
+            },
+          );
           worktrees.push(dir);
           const candidateVia = { runner: devVia.runner, model };
           const runner = labelRunner(

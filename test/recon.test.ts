@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config.js';
 import type { RunContext } from '../src/orchestrator.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner } from '../src/runner.js';
 import { createRun } from '../src/runs.js';
 import { SubagentEscalation } from '../src/subagents.js';
@@ -49,6 +50,31 @@ async function bigRepo(): Promise<string> {
   execFileSync('git', ['commit', '-q', '-m', 'many files'], { cwd });
   return cwd;
 }
+
+describe('recon context collection progress lines', () => {
+  it('emits its start and end lines before the agents run', async () => {
+    const cwd = await makeRepo();
+    const order: string[] = [];
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        order.push(event.type);
+      },
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    const runner: Runner = async () => {
+      order.push('agent');
+      return CONTEXT;
+    };
+    const ctx = { ...(await ctxFor(cwd, 'complete', runner)), reporter };
+    await createReconStage({ io: createFakeIO([]) })(ctx);
+    const lines = out.join('').split('\n');
+    expect(lines[0]).toBe('[recon] coletar contexto');
+    expect(lines[1]).toMatch(/^\[recon\] ok em \d+s$/);
+    expect(order.slice(0, 3)).toEqual(['step', 'step', 'agent']);
+  });
+});
 
 describe('recon', () => {
   it('a small repo takes one read-only explainer call and saves context.md', async () => {

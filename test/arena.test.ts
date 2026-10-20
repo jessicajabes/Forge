@@ -380,6 +380,48 @@ describe('arena checks', () => {
   });
 });
 
+describe('arena worktree progress lines', () => {
+  it('emits start and end lines for creating and for removing the worktrees', async () => {
+    const s = await setup();
+    const out: string[] = [];
+    const types: string[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        if (event.type === 'worktree')
+          types.push(`${event.action}:${event.phase}`);
+      },
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    await runArena({ ...s.ctx, reporter }, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    const lines = out.join('').split('\n');
+    // Candidates run in parallel, so each one's lines are checked on their own
+    for (const n of [1, 2, 3]) {
+      const head = `[arena · candidato ${n}]`;
+      const own = lines
+        .filter((l) => l.startsWith(head))
+        .map((l) => l.replace(/ ok em .*/, ' ok em'));
+      expect(own).toEqual([
+        `${head} criar worktree candidato-${n}`,
+        `${head} ok em`,
+        `${head} remover worktree candidato-${n}`,
+        `${head} ok em`,
+      ]);
+    }
+    for (const t of [
+      'create:start',
+      'create:end',
+      'remove:start',
+      'remove:end',
+    ]) {
+      expect(types.filter((x) => x === t)).toHaveLength(3);
+    }
+  });
+});
+
 describe('runChecks', () => {
   it('does not hang on a command that reads stdin until it ends', async () => {
     // `cat` with no file reads stdin, like `prettier` with no file

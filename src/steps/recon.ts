@@ -92,6 +92,38 @@ function ageText(mtime: Date, now: Date): string {
   return `contexto de ${days} ${days === 1 ? 'dia' : 'dias'} atrás`;
 }
 
+/** Start and end lines, with the duration, around the context collection. */
+async function withStepLines<T>(
+  ctx: RunContext,
+  work: () => Promise<T>,
+): Promise<T> {
+  const label = 'coletar contexto';
+  const started = Date.now();
+  await ctx.reporter?.report({
+    type: 'step',
+    id: 'recon',
+    label,
+    phase: 'start',
+  });
+  const end = (ok: boolean) =>
+    ctx.reporter?.report({
+      type: 'step',
+      id: 'recon',
+      label,
+      phase: 'end',
+      ok,
+      ms: Date.now() - started,
+    });
+  try {
+    const result = await work();
+    await end(true);
+    return result;
+  } catch (error) {
+    await end(false);
+    throw error;
+  }
+}
+
 export type ReconOptions = {
   io: IO;
   /** `--refresh-context`: rebuild even on a trivial task. */
@@ -134,21 +166,24 @@ export function createReconStage(options: ReconOptions): StageFn {
       }
     }
 
-    const skill = await loadSkill('recon', options.skillsDir);
-    const explorerTemplate = await loadReference(
-      'recon',
-      'explorer-prompt',
-      options.skillsDir,
-    );
-    const explainerTemplate = await loadReference(
-      'recon',
-      'explainer-prompt',
-      options.skillsDir,
-    );
-
-    const tracked = (await git(ctx.cwd, ['ls-files']))
-      .split('\n')
-      .filter((l) => l.length > 0);
+    // The part before the agents: loads the prompts and lists the tracked files
+    const { skill, explorerTemplate, explainerTemplate, tracked } =
+      await withStepLines(ctx, async () => ({
+        skill: await loadSkill('recon', options.skillsDir),
+        explorerTemplate: await loadReference(
+          'recon',
+          'explorer-prompt',
+          options.skillsDir,
+        ),
+        explainerTemplate: await loadReference(
+          'recon',
+          'explainer-prompt',
+          options.skillsDir,
+        ),
+        tracked: (await git(ctx.cwd, ['ls-files']))
+          .split('\n')
+          .filter((l) => l.length > 0),
+      }));
     let findings = '';
     if (tracked.length > SMALL_REPO_FILES) {
       const results = await runSubagents(
