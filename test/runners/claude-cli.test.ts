@@ -7,6 +7,7 @@ import {
   buildInvocation,
   createClaudeCliRunner,
   parseStream,
+  parseStreamEvents,
 } from '../../src/runners/claude-cli.js';
 
 const read = { prompt: 'p', files: [], canEdit: false };
@@ -94,6 +95,75 @@ describe('parseStream', () => {
   });
 });
 
+describe('parseStreamEvents', () => {
+  const assistant = (...content: object[]) =>
+    JSON.stringify({ type: 'assistant', message: { content } });
+  const use = (name: string, input: object) => ({
+    type: 'tool_use',
+    id: 't1',
+    name,
+    input,
+  });
+
+  it('reads Read, Grep and Bash tool_use events with their main argument', () => {
+    expect(
+      parseStreamEvents(assistant(use('Read', { file_path: 'src/x.ts' }))),
+    ).toEqual([{ type: 'tool', name: 'Read', arg: 'src/x.ts' }]);
+    expect(
+      parseStreamEvents(
+        assistant(use('Grep', { pattern: 'foo', path: 'src' })),
+      ),
+    ).toEqual([{ type: 'tool', name: 'Grep', arg: '"foo" src' }]);
+    expect(
+      parseStreamEvents(assistant(use('Bash', { command: 'npm test' }))),
+    ).toEqual([{ type: 'tool', name: 'Bash', arg: 'npm test' }]);
+  });
+
+  it('gives an unknown tool with the name only', () => {
+    expect(
+      parseStreamEvents(assistant(use('WebFetch', { url: 'http://x' }))),
+    ).toEqual([{ type: 'tool', name: 'WebFetch', arg: '' }]);
+  });
+
+  it('skips the text of the model and keeps several tools in order', () => {
+    const events = parseStreamEvents(
+      assistant(
+        { type: 'text', text: 'vou ler' },
+        use('Read', { file_path: 'a.ts' }),
+        use('Glob', { pattern: '*.ts' }),
+      ),
+    );
+    expect(events.map((e) => e.type === 'tool' && e.name)).toEqual([
+      'Read',
+      'Glob',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('vou ler');
+  });
+
+  it('reads the model of system/init', () => {
+    expect(
+      parseStreamEvents(
+        '{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}',
+      ),
+    ).toEqual([{ type: 'model', model: 'claude-sonnet-5-5' }]);
+  });
+
+  it('ignores results, tool results, other system events and broken lines', () => {
+    expect(parseStreamEvents('{"type":"system","subtype":"init"}')).toEqual([]);
+    expect(parseStreamEvents('{"type":"system","subtype":"hook"}')).toEqual([]);
+    expect(
+      parseStreamEvents(
+        '{"type":"user","message":{"content":[{"type":"tool_result","content":"segredo"}]}}',
+      ),
+    ).toEqual([]);
+    expect(
+      parseStreamEvents('{"type":"result","subtype":"success","result":"x"}'),
+    ).toEqual([]);
+    expect(parseStreamEvents('{broken')).toEqual([]);
+    expect(parseStreamEvents('')).toEqual([]);
+  });
+});
+
 describe('createClaudeCliRunner', () => {
   function fakeChild(output: string, code = 0): ChildProcess {
     const child = new EventEmitter() as ChildProcess;
@@ -120,6 +190,37 @@ describe('createClaudeCliRunner', () => {
     });
     expect(await runner(read)).toBe('oi');
     expect(seen).toEqual([{ cmd: 'claude', cwd: '/repo' }]);
+  });
+
+  it('calls onEvent for the model and tools, even when a line is split across chunks', async () => {
+    const lines = [
+      '{"type":"system","subtype":"init","model":"m-real"}',
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.ts"}}]}}',
+      '{"type":"result","subtype":"success","is_error":false,"result":"oi"}',
+    ].join('\n');
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: () => {
+        const child = new EventEmitter() as ChildProcess;
+        const stdout = new PassThrough();
+        const stdin = new PassThrough();
+        Object.assign(child, { stdout, stderr: new PassThrough(), stdin });
+        stdin.on('finish', () => {
+          stdout.write(lines.slice(0, 90));
+          stdout.end(lines.slice(90));
+          setImmediate(() => child.emit('close', 0));
+        });
+        return child;
+      },
+    });
+    const events: unknown[] = [];
+    expect(await runner({ ...read, onEvent: (e) => events.push(e) })).toBe(
+      'oi',
+    );
+    expect(events).toEqual([
+      { type: 'model', model: 'm-real' },
+      { type: 'tool', name: 'Read', arg: 'a.ts' },
+    ]);
   });
 
   it('an editing call has no timeout unless editTimeoutMs is set, and a read-only call stops at 30 minutes', async () => {

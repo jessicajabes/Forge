@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { RunRequest, Runner } from '../runner.js';
+import { summarizeToolArg } from '../progress.js';
+import type { RunRequest, Runner, RunnerEvent } from '../runner.js';
 
 export class ClaudeCliError extends Error {
   constructor(message: string) {
@@ -117,6 +118,50 @@ export function parseStream(output: string): string {
   return result;
 }
 
+/**
+ * Reads one line of the `stream-json` output and returns the events it carries: the
+ * model of `system`/`init` and the `tool_use` blocks of `assistant`. The model's text
+ * and the tool results are never returned. Pure, so tests do not need the CLI.
+ */
+export function parseStreamEvents(line: string): RunnerEvent[] {
+  if (!line.trim().startsWith('{')) return [];
+  let event: {
+    type?: string;
+    subtype?: string;
+    model?: unknown;
+    message?: { content?: unknown };
+  };
+  try {
+    event = JSON.parse(line) as typeof event;
+  } catch {
+    return [];
+  }
+  if (event.type === 'system') {
+    return event.subtype === 'init' &&
+      typeof event.model === 'string' &&
+      event.model.length > 0
+      ? [{ type: 'model', model: event.model }]
+      : [];
+  }
+  const content = event.message?.content;
+  if (event.type !== 'assistant' || !Array.isArray(content)) return [];
+  const events: RunnerEvent[] = [];
+  for (const block of content as unknown[]) {
+    const b = block as {
+      type?: string;
+      name?: unknown;
+      input?: unknown;
+    } | null;
+    if (b?.type !== 'tool_use' || typeof b.name !== 'string') continue;
+    events.push({
+      type: 'tool',
+      name: b.name,
+      arg: summarizeToolArg(b.name, b.input),
+    });
+  }
+  return events;
+}
+
 export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
   if (opts.notice && process.env['ANTHROPIC_API_KEY']) {
     opts.notice(
@@ -138,6 +183,11 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       const child = start('claude', args, { cwd: opts.cwd, env });
       let stdout = '';
       let stderr = '';
+      let pending = '';
+      const emit = (line: string) => {
+        if (!req.onEvent) return;
+        for (const e of parseStreamEvents(line)) req.onEvent(e);
+      };
       const limit = req.canEdit
         ? opts.editTimeoutMs
         : (opts.timeoutMs ?? 30 * 60_000);
@@ -149,7 +199,15 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
               reject(new ClaudeCliError(`o claude passou de ${limit} ms`));
             }, limit);
 
-      child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stdout?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        if (!req.onEvent) return;
+        pending += text;
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        lines.forEach(emit);
+      });
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
       child.on('error', (error) => {
         clearTimeout(timer);
@@ -161,6 +219,8 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       });
       child.on('close', (code) => {
         clearTimeout(timer);
+        emit(pending);
+        pending = '';
         try {
           resolve(parseStream(stdout));
         } catch (error) {
