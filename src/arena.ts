@@ -99,11 +99,14 @@ export async function runChecks(
     const [cmd, ...args] = command.trim().split(/\s+/);
     if (!cmd) continue;
     try {
-      await execFileAsync(cmd, args, {
+      const running = execFileAsync(cmd, args, {
         cwd,
         timeout: 10 * 60_000,
         maxBuffer: 16 * 1024 * 1024,
       });
+      // A command that reads stdin (`prettier` with no files) would wait for it until the timeout
+      running.child.stdin?.end();
+      await running;
       results.push({ command, ok: true, detail: 'passou' });
     } catch (error) {
       const e = error as { code?: number | string; stderr?: string };

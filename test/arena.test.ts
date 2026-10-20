@@ -2,7 +2,12 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ArenaEscalation, runArena, safeCommands } from '../src/arena.js';
+import {
+  ArenaEscalation,
+  runArena,
+  runChecks,
+  safeCommands,
+} from '../src/arena.js';
 import { parseConfig } from '../src/config.js';
 import { git } from '../src/git.js';
 import type { RunContext } from '../src/orchestrator.js';
@@ -295,4 +300,12 @@ describe('arena models', () => {
       expect(call.runner).toBe('claude-cli');
     }
   });
+});
+
+describe('runChecks', () => {
+  it('does not hang on a command that reads stdin until it ends', async () => {
+    // `cat` with no file reads stdin, like `prettier` with no file
+    const results = await runChecks(process.cwd(), ['cat']);
+    expect(results).toEqual([{ command: 'cat', ok: true, detail: 'passou' }]);
+  }, 10_000);
 });
