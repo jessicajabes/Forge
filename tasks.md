@@ -232,11 +232,11 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/runners/copilot-cli.ts` (novo), `test/runners/copilot-cli.test.ts` (novo)
 - **O que fazer**: Rodar `copilot -p` com `-s` ou `--output-format json`, `--no-ask-user`, `--no-custom-instructions`, `--no-auto-update`, `--usage-output-file` e `--deny-tool write --deny-tool shell` nas etapas somente leitura (4.3). A T2 liberou o Dev: `canEdit: true` usa `--allow-tool write`, `--allow-tool 'shell(<comando>)'` por item de `dev.allowed_commands`, `--deny-tool` de prefixo para `git push`, `rm`, `curl` e `wget` e `--disallow-temp-dir` (4.6). Nunca `--allow-all`, `--allow-all-tools` nem `--yolo`.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que confirma `--deny-tool write` e `--deny-tool shell` em somente leitura
-  - [ ] Teste confirma que `--allow-all`, `--allow-all-tools` e `--yolo` nunca aparecem
-  - [ ] Teste confirma que `canEdit: true` inclui `--allow-tool write`, os quatro `--deny-tool` de prefixo e `--disallow-temp-dir`
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que confirma `--deny-tool write` e `--deny-tool shell` em somente leitura
+  - [x] Teste confirma que `--allow-all`, `--allow-all-tools` e `--yolo` nunca aparecem
+  - [x] Teste confirma que `canEdit: true` inclui `--allow-tool write`, os quatro `--deny-tool` de prefixo e `--disallow-temp-dir`
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T2, T4
 
 ## T25: CLI `forge-jj` e perguntas iniciais
