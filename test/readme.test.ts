@@ -12,6 +12,7 @@ describe('README', () => {
     for (const [, script] of readme.matchAll(/npm run ([\w:-]+)/g)) {
       expect(pkg.scripts, `npm run ${script}`).toHaveProperty(script ?? '');
     }
+    expect(readme).toMatch(/^\| `--quiet` \|/m);
     // only the flags in the usage table belong to forge-jj; the README also names
     // flags of other tools (such as --yolo) to say they are never used
     for (const [, found] of readme.matchAll(/^\| `(--[a-z-]+)/gm)) {

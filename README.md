@@ -61,11 +61,26 @@ Flags skip the questions:
 | `--review <final\|per_task>` | The reviewer checks everything at the end, or each task before the next |
 | `--no-arena` | Plain Dev, no arena |
 | `--arena <n>` | Number of arena candidates |
-| `--refresh-context` | Rebuild the context summary even on a trivial run |
+| `--refresh-context` | Rebuild the shared context summary even if the repo did not change |
+| `--quiet` | No progress lines on the terminal. `progress.jsonl` is still written |
 
 `forge-jj` with no argument resumes the last interrupted run.
 
 Forge is interactive only: it needs a terminal (a TTY) and refuses to run without one.
+
+### Progress output
+
+While it runs, Forge reports what is happening on **stderr**, so stdout keeps only the interview questions and the results of the stages. It is on by default; `--quiet` turns it off.
+
+- Each stage prints an entry line with its position (`▶ etapa dev (3/7)`) and an exit line with its duration.
+- Each agent call prints a start line (stage, runner, model, read-only or editing) and an end line (duration, `ok` or `erro`). With Claude Code it also prints one line per tool the agent uses, such as `Read src/x.ts` or `Bash npm test`. The model's text and the tool results are never shown. With Copilot you only get the start and end lines.
+- Parallel calls (subagents and arena candidates) are interleaved, and every line carries the prefix of who wrote it, such as `[dev · candidato 2 · claude-cli/sonnet]`.
+- Long steps that use no agent (build and test commands, arena worktrees, the Recon context collection) print start and end lines too. Their raw output is not shown.
+- When a call fails, the end line shows the reason and the last 5 lines of the CLI's stderr. When a call hits its time limit, the end line says it was stopped by timeout.
+- On a TTY, one footer line is rewritten in place and sums up everything that is running, with the time of each call over its limit (`candidato 1 2m10s/30m`). It is erased while Forge waits for your answer and drawn again afterwards.
+- With Claude Code, after 2 minutes without any event from the CLI the footer adds `sem atividade há X`, and a warning line is printed, then repeated every 5 minutes while the call stays idle.
+
+Colors, symbols and the footer only appear when stderr is a TTY and `NO_COLOR` is not set. Otherwise the output is plain text (`ok` and `erro`) with no footer, which is also what you get when stderr is redirected to a file.
 
 ### During the Grill
 
@@ -88,11 +103,11 @@ Ctrl+C keeps a draft, and the next run offers to continue it.
 - Its files live in `.workflow/` and `.workflow.yml`. The first run adds both to `.git/info/exclude`; your `.gitignore` is never touched.
 - Only one run at a time per repository.
 
-Each run has its own folder, `.workflow/runs/<date>-<slug>/`, with `spec.md`, `tasks.md`, `context.md` and `review.md`. `.workflow/lessons.md` is shared by all runs.
+Each run has its own folder, `.workflow/runs/<date>-<slug>/`, with `spec.md`, `tasks.md`, a copy of `context.md` and `review.md`. It also holds two logs: `calls.jsonl`, with one line per call to an agent (including the model the CLI really used, when Claude reports it), and `progress.jsonl`, with every progress event and its time (stages, calls, tools, detected model, inactivity, timeouts, build and worktree steps, and the full stderr of failed calls). `progress.jsonl` is written even with `--quiet` and never contains colors. `.workflow/lessons.md` and `.workflow/context.md` are shared by all runs: the context is rebuilt only when the repo changed since it was made.
 
 ## Configuration
 
-Copy [`.workflow.example.yml`](.workflow.example.yml) to `.workflow.yml` in the target repository. Every field is optional. You can pick a runner and a model per stage, several reviewers of different models, the number of arena candidates, one model per candidate, and the arena judge.
+Copy [`.workflow.example.yml`](.workflow.example.yml) to `.workflow.yml` in the target repository. Every field is optional. You can pick a runner and a model per stage, several reviewers of different models, the number of arena candidates, one model per candidate, and the arena judge. `dev.batching: per_task` makes one Dev call per task (each committed as it ends) while the review stays at the end. Editing calls have no turn or time limit unless you set `dev.max_turns` or `dev.timeout_minutes`. `dev.check_commands` (default `npm test` and `npm run lint`) is what the arena runs on the integrated result, apart from `dev.allowed_commands`, which is what a candidate may run.
 
 Without a config, everything runs on `claude-cli` with Claude Code's default model, with 3 arena candidates, review at the end, and at most 3 review cycles.
 

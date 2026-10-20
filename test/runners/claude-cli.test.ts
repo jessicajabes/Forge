@@ -1,12 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { RunnerTimeoutError, type RunnerEvent } from '../../src/runner.js';
 import {
   ClaudeCliError,
   buildInvocation,
   createClaudeCliRunner,
   parseStream,
+  parseStreamEvents,
 } from '../../src/runners/claude-cli.js';
 
 const read = { prompt: 'p', files: [], canEdit: false };
@@ -32,6 +34,14 @@ describe('buildInvocation', () => {
     expect(args).not.toContain('Bash');
     expect(args.join(' ')).not.toMatch(/bypassPermissions|dangerously/);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
+  });
+
+  it('an editing call has no turn limit unless editMaxTurns is set, and a read-only call has 20', () => {
+    expect(buildInvocation(edit, opts, {}).args).not.toContain('--max-turns');
+    const readArgs = buildInvocation(read, opts, {}).args;
+    expect(readArgs[readArgs.indexOf('--max-turns') + 1]).toBe('20');
+    const limited = buildInvocation(edit, { ...opts, editMaxTurns: 90 }, {});
+    expect(limited.args[limited.args.indexOf('--max-turns') + 1]).toBe('90');
   });
 
   it('is isolated by default: project settings only, no MCP, no skills, no auto memory', () => {
@@ -86,13 +96,84 @@ describe('parseStream', () => {
   });
 });
 
+describe('parseStreamEvents', () => {
+  const assistant = (...content: object[]) =>
+    JSON.stringify({ type: 'assistant', message: { content } });
+  const use = (name: string, input: object) => ({
+    type: 'tool_use',
+    id: 't1',
+    name,
+    input,
+  });
+
+  it('reads Read, Grep and Bash tool_use events with their main argument', () => {
+    expect(
+      parseStreamEvents(assistant(use('Read', { file_path: 'src/x.ts' }))),
+    ).toEqual([{ type: 'tool', name: 'Read', arg: 'src/x.ts' }]);
+    expect(
+      parseStreamEvents(
+        assistant(use('Grep', { pattern: 'foo', path: 'src' })),
+      ),
+    ).toEqual([{ type: 'tool', name: 'Grep', arg: '"foo" src' }]);
+    expect(
+      parseStreamEvents(assistant(use('Bash', { command: 'npm test' }))),
+    ).toEqual([{ type: 'tool', name: 'Bash', arg: 'npm test' }]);
+  });
+
+  it('gives an unknown tool with the name only', () => {
+    expect(
+      parseStreamEvents(assistant(use('WebFetch', { url: 'http://x' }))),
+    ).toEqual([{ type: 'tool', name: 'WebFetch', arg: '' }]);
+  });
+
+  it('skips the text of the model and keeps several tools in order', () => {
+    const events = parseStreamEvents(
+      assistant(
+        { type: 'text', text: 'vou ler' },
+        use('Read', { file_path: 'a.ts' }),
+        use('Glob', { pattern: '*.ts' }),
+      ),
+    );
+    expect(events.map((e) => e.type === 'tool' && e.name)).toEqual([
+      'Read',
+      'Glob',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('vou ler');
+  });
+
+  it('reads the model of system/init', () => {
+    expect(
+      parseStreamEvents(
+        '{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}',
+      ),
+    ).toEqual([{ type: 'model', model: 'claude-sonnet-5-5' }]);
+  });
+
+  it('ignores results, tool results, other system events and broken lines', () => {
+    expect(parseStreamEvents('{"type":"system","subtype":"init"}')).toEqual([]);
+    expect(parseStreamEvents('{"type":"system","subtype":"hook"}')).toEqual([]);
+    expect(
+      parseStreamEvents(
+        '{"type":"user","message":{"content":[{"type":"tool_result","content":"segredo"}]}}',
+      ),
+    ).toEqual([]);
+    expect(
+      parseStreamEvents('{"type":"result","subtype":"success","result":"x"}'),
+    ).toEqual([]);
+    expect(parseStreamEvents('{broken')).toEqual([]);
+    expect(parseStreamEvents('')).toEqual([]);
+  });
+});
+
 describe('createClaudeCliRunner', () => {
-  function fakeChild(output: string, code = 0): ChildProcess {
+  function fakeChild(output: string, code = 0, stderrText = ''): ChildProcess {
     const child = new EventEmitter() as ChildProcess;
     const stdout = new PassThrough();
+    const stderr = new PassThrough();
     const stdin = new PassThrough();
-    Object.assign(child, { stdout, stderr: new PassThrough(), stdin });
+    Object.assign(child, { stdout, stderr, stdin });
     stdin.on('finish', () => {
+      stderr.end(stderrText);
       stdout.end(output);
       setImmediate(() => child.emit('close', code));
     });
@@ -114,12 +195,279 @@ describe('createClaudeCliRunner', () => {
     expect(seen).toEqual([{ cmd: 'claude', cwd: '/repo' }]);
   });
 
+  it('calls onEvent for the model and tools, even when a line is split across chunks', async () => {
+    const lines = [
+      '{"type":"system","subtype":"init","model":"m-real"}',
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.ts"}}]}}',
+      '{"type":"result","subtype":"success","is_error":false,"result":"oi"}',
+    ].join('\n');
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: () => {
+        const child = new EventEmitter() as ChildProcess;
+        const stdout = new PassThrough();
+        const stdin = new PassThrough();
+        Object.assign(child, { stdout, stderr: new PassThrough(), stdin });
+        stdin.on('finish', () => {
+          stdout.write(lines.slice(0, 90));
+          stdout.end(lines.slice(90));
+          setImmediate(() => child.emit('close', 0));
+        });
+        return child;
+      },
+    });
+    const events: unknown[] = [];
+    expect(await runner({ ...read, onEvent: (e) => events.push(e) })).toBe(
+      'oi',
+    );
+    expect(events).toEqual([
+      { type: 'model', model: 'm-real' },
+      { type: 'tool', name: 'Read', arg: 'a.ts' },
+    ]);
+  });
+
+  it('an editing call has no timeout unless editTimeoutMs is set, and a read-only call stops at 30 minutes', async () => {
+    vi.useFakeTimers();
+    try {
+      const hang = () => {
+        const child = new EventEmitter() as ChildProcess;
+        Object.assign(child, {
+          stdout: new PassThrough(),
+          stderr: new PassThrough(),
+          stdin: new PassThrough(),
+          kill: () => true,
+        });
+        return child;
+      };
+      const runner = createClaudeCliRunner({ cwd: '/repo', spawnFn: hang });
+      let editSettled = false;
+      const settle = () => {
+        editSettled = true;
+      };
+      runner(edit).then(settle, settle);
+      const readResult = runner(read).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      const timedOut = await readResult;
+      expect(timedOut).toBeInstanceOf(RunnerTimeoutError);
+      expect((timedOut as RunnerTimeoutError).limitMs).toBe(30 * 60_000);
+      expect(editSettled).toBe(false);
+
+      const limited = createClaudeCliRunner({
+        cwd: '/repo',
+        editTimeoutMs: 60_000,
+        spawnFn: hang,
+      });
+      const outcome = limited(edit).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(61_000);
+      const edited = await outcome;
+      expect(edited).toBeInstanceOf(RunnerTimeoutError);
+      expect((edited as RunnerTimeoutError).limitMs).toBe(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe('with a fake clock', () => {
+    const MIN = 60_000;
+
+    function fakeClock() {
+      let now = 0;
+      let nextId = 0;
+      const timers = new Map<
+        number,
+        { at: number; fn: () => void; every?: number }
+      >();
+      const add = (fn: () => void, ms: number, every?: number) => {
+        const id = nextId++;
+        timers.set(id, { at: now + ms, fn, every });
+        return () => void timers.delete(id);
+      };
+      return {
+        setTimeout: (fn: () => void, ms: number) => add(fn, ms),
+        setInterval: (fn: () => void, ms: number) => add(fn, ms, ms),
+        now: () => now,
+        advance(ms: number) {
+          const target = now + ms;
+          for (;;) {
+            const due = [...timers.entries()]
+              .filter(([, t]) => t.at <= target)
+              .sort((a, b) => a[1].at - b[1].at)[0];
+            if (!due) break;
+            const [id, t] = due;
+            now = t.at;
+            if (t.every === undefined) timers.delete(id);
+            else t.at += t.every;
+            t.fn();
+          }
+          now = target;
+        },
+      };
+    }
+
+    function hangingChild() {
+      const child = new EventEmitter() as ChildProcess;
+      const stdout = new PassThrough();
+      Object.assign(child, {
+        stdout,
+        stderr: new PassThrough(),
+        stdin: new PassThrough(),
+        kill: () => true,
+      });
+      return { child, stdout };
+    }
+
+    it('reports inactivity at 2 minutes, repeats every 5 and resets on a new stream line', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) });
+      const idle = () => events.filter((e) => e.type === 'inactivity');
+
+      clock.advance(2 * MIN - 1);
+      expect(idle()).toEqual([]);
+      clock.advance(1);
+      expect(idle()).toEqual([{ type: 'inactivity', idleMs: 2 * MIN }]);
+      clock.advance(5 * MIN);
+      expect(idle()).toEqual([
+        { type: 'inactivity', idleMs: 2 * MIN },
+        { type: 'inactivity', idleMs: 7 * MIN },
+      ]);
+
+      stdout.write('{"type":"system","subtype":"hook"}\n');
+      await new Promise((r) => setImmediate(r));
+      clock.advance(2 * MIN - 1);
+      expect(idle()).toHaveLength(2);
+      clock.advance(1);
+      expect(idle()).toHaveLength(3);
+      expect(idle()[2]).toEqual({ type: 'inactivity', idleMs: 2 * MIN });
+
+      stdout.end(
+        '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+      );
+      child.emit('close', 0);
+      expect(await outcome).toBe('oi');
+      clock.advance(30 * MIN);
+      expect(idle()).toHaveLength(3);
+    });
+
+    it('emits one activity event when output returns after an inactivity warning', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) });
+      const activity = () => events.filter((e) => e.type === 'activity');
+
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      expect(activity()).toEqual([]);
+
+      clock.advance(2 * MIN);
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      expect(activity()).toEqual([{ type: 'activity' }]);
+
+      stdout.end(
+        '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+      );
+      child.emit('close', 0);
+      await outcome;
+    });
+
+    it('still times out at the configured limit and stops reporting inactivity', async () => {
+      const clock = fakeClock();
+      const { child } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        timeoutMs: 10 * MIN,
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) }).catch(
+        (e: unknown) => e,
+      );
+      clock.advance(10 * MIN - 1);
+      let settled = false;
+      void outcome.then(() => (settled = true));
+      await new Promise((r) => setImmediate(r));
+      expect(settled).toBe(false);
+      clock.advance(1);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(RunnerTimeoutError);
+      expect((error as RunnerTimeoutError).limitMs).toBe(10 * MIN);
+      const seen = events.length;
+      clock.advance(20 * MIN);
+      expect(events).toHaveLength(seen);
+    });
+
+    it('ignores the stream of a process that outlives the timeout', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        timeoutMs: 10 * MIN,
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) }).catch(
+        (e: unknown) => e,
+      );
+      clock.advance(10 * MIN);
+      expect(await outcome).toBeInstanceOf(RunnerTimeoutError);
+      const seen = events.length;
+
+      stdout.write(
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"x.ts"}}]}}\n',
+      );
+      await new Promise((r) => setImmediate(r));
+      child.emit('close', null);
+      clock.advance(30 * MIN);
+      expect(events).toHaveLength(seen);
+    });
+
+    it('exposes the limit of each mode', () => {
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        editTimeoutMs: 5 * MIN,
+      });
+      expect(runner.limitFor?.(false)).toBe(30 * MIN);
+      expect(runner.limitFor?.(true)).toBe(5 * MIN);
+    });
+  });
+
   it('rejects when the process fails', async () => {
     const runner = createClaudeCliRunner({
       cwd: '/repo',
       spawnFn: () => fakeChild('', 1),
     });
     await expect(runner(read)).rejects.toThrow(ClaudeCliError);
+  });
+
+  it('a failure carries the full stderr and the exit code', async () => {
+    const long = Array.from({ length: 80 }, (_, i) => `linha ${i}`).join('\n');
+    const runner = createClaudeCliRunner({
+      cwd: '/repo',
+      spawnFn: () => fakeChild('', 3, long),
+    });
+    const error = (await runner(read).catch(
+      (e: unknown) => e,
+    )) as ClaudeCliError;
+    expect(error).toBeInstanceOf(ClaudeCliError);
+    expect(error.stderr).toBe(long);
+    expect(error.exitCode).toBe(3);
   });
 
   it('warns when ANTHROPIC_API_KEY would replace the login', () => {

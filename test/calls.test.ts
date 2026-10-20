@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { logCalls, type CallRecord } from '../src/calls.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { RunnerFactory } from '../src/runner.js';
+import { labelRunner } from '../src/subagents.js';
 
 async function lines(path: string): Promise<CallRecord[]> {
   return (await readFile(path, 'utf-8'))
@@ -44,6 +46,43 @@ describe('logCalls', () => {
     expect(await readFile(path, 'utf-8')).not.toContain('SEGREDO-NO-PROMPT');
   });
 
+  it('records the real model when the runner reports it, and forwards the event', async () => {
+    const path = join(
+      await mkdtemp(join(tmpdir(), 'forge-calls-')),
+      'calls.jsonl',
+    );
+    const factory: RunnerFactory = () => async (req) => {
+      req.onEvent?.({ type: 'model', model: 'claude-real-1' });
+      return 'ok';
+    };
+    const seen: string[] = [];
+    await logCalls(factory, path)({ cwd: '/x', model: 'configured' })({
+      prompt: 'p',
+      files: [],
+      canEdit: false,
+      onEvent: (e) => seen.push(e.type),
+    });
+    expect((await lines(path))[0]).toMatchObject({ model: 'claude-real-1' });
+    expect(seen).toEqual(['model']);
+  });
+
+  it('keeps the configured model when the runner reports none', async () => {
+    const path = join(
+      await mkdtemp(join(tmpdir(), 'forge-calls-')),
+      'calls.jsonl',
+    );
+    const factory: RunnerFactory = () => async (req) => {
+      req.onEvent?.({ type: 'tool', name: 'Read', arg: 'a.ts' });
+      return 'ok';
+    };
+    await logCalls(factory, path)({ cwd: '/x', model: 'configured' })({
+      prompt: 'p',
+      files: [],
+      canEdit: false,
+    });
+    expect((await lines(path))[0]).toMatchObject({ model: 'configured' });
+  });
+
   it('records a failed call and rethrows the error', async () => {
     const path = join(
       await mkdtemp(join(tmpdir(), 'forge-calls-')),
@@ -59,5 +98,26 @@ describe('logCalls', () => {
       make({ cwd: '/x' })({ prompt: 'p', files: [], canEdit: false }),
     ).rejects.toThrow('falhou');
     expect((await lines(path))[0]).toMatchObject({ ok: false, outputChars: 0 });
+  });
+
+  it('keeps the time limit of the runner, so the footer shows elapsed/limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-calls-'));
+    const factory: RunnerFactory = () =>
+      Object.assign(async () => 'ok', { limitFor: () => 30 * 60_000 });
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns: 80 },
+      env: {},
+      now: () => 0,
+    });
+    const runner = labelRunner(
+      logCalls(factory, join(dir, 'calls.jsonl'))({ cwd: '/x' }),
+      reporter,
+      'dev',
+    );
+    expect(runner.limitFor?.(false)).toBe(30 * 60_000);
+    await runner({ prompt: 'p', files: [], canEdit: false });
+    expect(out.join('')).toContain('dev 0s/30m');
   });
 });

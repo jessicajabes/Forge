@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { saveArtifact } from './artifacts.js';
@@ -12,9 +12,16 @@ import {
 } from './git.js';
 import type { IO } from './io.js';
 import type { RunContext } from './orchestrator.js';
+import type { ProgressReporter } from './progressReporter.js';
 import type { RunnerFactory } from './runner.js';
 import { loadReference, loadSkill } from './skills.js';
-import { assertAllOk, mapLimit, runSubagents } from './subagents.js';
+import {
+  assertAllOk,
+  labelRunner,
+  mapLimit,
+  originLabel,
+  runSubagents,
+} from './subagents.js';
 import { buildDevPrompt, gatherInputs, type Batch } from './steps/dev.js';
 
 const execFileAsync = promisify(execFile);
@@ -40,7 +47,14 @@ type Candidate = {
   report: string;
   diff: string;
 };
-type Dropout = { index: number; reason: string };
+type Dropout = { index: number; reason: string; unchanged: boolean };
+
+/** A candidate that ended without error and without a diff; unlike a crash, it is not a failure. */
+class NoChange extends Error {
+  constructor() {
+    super('não mudou nada');
+  }
+}
 
 const verdictSchema = z.object({
   scores: z.array(
@@ -74,6 +88,42 @@ export function safeCommands(commands: string[]): string[] {
   return commands.filter((c) => !/^\s*git\s+(worktree|push)\b/.test(c));
 }
 
+/** Start and end lines for one worktree operation. The end line carries the outcome and the time. */
+async function withWorktreeLines<T>(
+  reporter: ProgressReporter | undefined,
+  id: string,
+  action: 'create' | 'remove',
+  label: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  await reporter?.report({
+    type: 'worktree',
+    id,
+    label,
+    action,
+    phase: 'start',
+  });
+  const end = (ok: boolean) =>
+    reporter?.report({
+      type: 'worktree',
+      id,
+      label,
+      action,
+      phase: 'end',
+      ok,
+      ms: Date.now() - started,
+    });
+  try {
+    const result = await work();
+    await end(true);
+    return result;
+  } catch (error) {
+    await end(false);
+    throw error;
+  }
+}
+
 const MAX_DIFF_CHARS = 60_000;
 const clip = (diff: string) =>
   diff.length > MAX_DIFF_CHARS
@@ -93,19 +143,43 @@ function renderCandidates(candidates: Candidate[]): string {
 export async function runChecks(
   cwd: string,
   commands: string[],
+  reporter?: ProgressReporter,
+  now: () => number = Date.now,
 ): Promise<{ command: string; ok: boolean; detail: string }[]> {
   const results = [];
   for (const command of commands) {
     const [cmd, ...args] = command.trim().split(/\s+/);
     if (!cmd) continue;
+    // The raw output of the command is never passed on: only these two lines.
+    const started = now();
+    await reporter?.report({
+      type: 'step',
+      id: 'build',
+      label: command,
+      phase: 'start',
+    });
+    const reportEnd = (ok: boolean) =>
+      reporter?.report({
+        type: 'step',
+        id: 'build',
+        label: command,
+        phase: 'end',
+        ok,
+        ms: now() - started,
+      });
     try {
-      await execFileAsync(cmd, args, {
+      const running = execFileAsync(cmd, args, {
         cwd,
         timeout: 10 * 60_000,
         maxBuffer: 16 * 1024 * 1024,
       });
+      // A command that reads stdin (`prettier` with no files) would wait for it until the timeout
+      running.child.stdin?.end();
+      await running;
+      await reportEnd(true);
       results.push({ command, ok: true, detail: 'passou' });
     } catch (error) {
+      await reportEnd(false);
       const e = error as { code?: number | string; stderr?: string };
       results.push({
         command,
@@ -138,7 +212,27 @@ export async function runArena(
     .map((t) => inputs.blocks.get(t.id) ?? `## T${t.id}: ${t.title}`)
     .join('\n\n');
   const allowed = safeCommands(ctx.config.dev.allowed_commands);
+  const devVia = {
+    runner: ctx.config.steps.dev.runner,
+    model: ctx.config.steps.dev.model,
+  };
   const worktrees: string[] = [];
+  // Idempotent: it runs before the checks and again in `finally`, which also covers failures
+  const removeWorktrees = async () => {
+    for (const dir of worktrees.splice(0)) {
+      const name = basename(dir);
+      await withWorktreeLines(
+        ctx.reporter,
+        `arena · ${name.replace('-', ' ')}`,
+        'remove',
+        `remover worktree ${name}`,
+        async () => {
+          await removeWorktree(ctx.cwd, dir);
+          await rm(dir, { recursive: true, force: true });
+        },
+      );
+    }
+  };
 
   try {
     // 1. Rubric: derived before any candidate starts, never shown to them.
@@ -161,7 +255,12 @@ export async function runArena(
           },
         },
       ],
-      { maxParallel: 1 },
+      {
+        maxParallel: 1,
+        reporter: ctx.reporter,
+        origin: 'dev',
+        via: devVia,
+      },
     );
     const rubric =
       assertAllOk(rubricResult ? [rubricResult] : [])[0]?.text ?? '';
@@ -189,21 +288,38 @@ export async function runArena(
           cfg.models?.[(index - 1) % (cfg.models?.length || 1)] ??
           ctx.config.steps.dev.model;
         try {
-          await addWorktree(ctx.cwd, dir);
+          // A run that was interrupted leaves its worktrees behind, and `git worktree add` refuses a path that exists
+          await withWorktreeLines(
+            ctx.reporter,
+            `arena · candidato ${index}`,
+            'create',
+            `criar worktree candidato-${index}`,
+            async () => {
+              await removeWorktree(ctx.cwd, dir);
+              await rm(dir, { recursive: true, force: true });
+              await addWorktree(ctx.cwd, dir);
+            },
+          );
           worktrees.push(dir);
-          const runner = deps.makeRunner({
-            cwd: dir,
-            runner: ctx.config.steps.dev.runner,
-            ...(model ? { model } : {}),
-            allowedCommands: allowed,
-          });
+          const candidateVia = { runner: devVia.runner, model };
+          const runner = labelRunner(
+            deps.makeRunner({
+              cwd: dir,
+              runner: ctx.config.steps.dev.runner,
+              ...(model ? { model } : {}),
+              allowedCommands: allowed,
+            }),
+            ctx.reporter,
+            originLabel(['dev', `candidato ${index}`], candidateVia),
+            candidateVia,
+          );
           const report = await runner({
             prompt: devPrompt,
             files: [],
             canEdit: true,
           });
           const diff = await workingDiff(dir);
-          if (diff.trim() === '') throw new Error('não mudou nada');
+          if (diff.trim() === '') throw new NoChange();
           return {
             ok: true as const,
             candidate: { index, dir, model, report, diff },
@@ -211,7 +327,11 @@ export async function runArena(
         } catch (error) {
           return {
             ok: false as const,
-            dropout: { index, reason: (error as Error).message },
+            dropout: {
+              index,
+              reason: (error as Error).message,
+              unchanged: error instanceof NoChange,
+            },
           };
         }
       },
@@ -224,6 +344,20 @@ export async function runArena(
     );
     for (const d of dropouts)
       io.write(`Candidato ${d.index} desistiu: ${d.reason}.`);
+    if (candidates.length === 0 && dropouts.every((d) => d.unchanged)) {
+      // Every candidate ran fine and found nothing to change (a verification-only task, or
+      // work already done): not a failure, so there is nothing to judge and nothing to ask.
+      await removeWorktrees();
+      const note = `# Arena - lote ${batch.index} de ${batch.total}
+
+Nenhum candidato mudou nada: ${cfg.candidates} candidatos rodaram sem erro e a tarefa não pedia alteração.
+`;
+      await saveArtifact(join(arenaDir, 'arena.md'), note, () => undefined);
+      io.write(
+        'Nenhum candidato precisou mudar nada: seguindo sem alterações.',
+      );
+      return { note };
+    }
     if (candidates.length === 0) {
       throw new ArenaEscalation(
         'nenhum candidato entregou mudanças: a pessoa precisa decidir o que fazer.',
@@ -268,7 +402,12 @@ export async function runArena(
             validate: parseVerdict,
           },
         ],
-        { maxParallel: 1 },
+        {
+          maxParallel: 1,
+          reporter: ctx.reporter,
+          origin: 'dev',
+          via: cfg.judge ?? devVia,
+        },
       );
       let verdict: Verdict | null = null;
       if (judged?.ok) {
@@ -311,8 +450,14 @@ export async function runArena(
         /## Arena note[\s\S]*$/.exec(integrated)?.[0] ?? integrated.trim();
     }
 
-    // 5. Verify the result with the project's own commands.
-    const checks = await runChecks(ctx.cwd, allowed);
+    // 5. Verify the result with the project's own commands. The worktrees go first: they
+    // sit inside the project, so lint and the tests would read every copy of the code.
+    await removeWorktrees();
+    const checks = await runChecks(
+      ctx.cwd,
+      ctx.config.dev.check_commands,
+      ctx.reporter,
+    );
     const checksText =
       checks.length === 0
         ? 'nenhum comando para verificar'
@@ -341,9 +486,6 @@ ${checksText}
     return { note };
   } finally {
     // The worktrees always go, even when the arena fails or escalates.
-    for (const dir of worktrees) {
-      await removeWorktree(ctx.cwd, dir);
-      await rm(dir, { recursive: true, force: true });
-    }
+    await removeWorktrees();
   }
 }

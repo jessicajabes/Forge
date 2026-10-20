@@ -1,5 +1,5 @@
 import { appendFile } from 'node:fs/promises';
-import type { RunnerFactory } from './runner.js';
+import type { Runner, RunnerFactory, RunRequest } from './runner.js';
 
 export type CallRecord = {
   at: string;
@@ -20,13 +20,18 @@ export type CallRecord = {
 export function logCalls(factory: RunnerFactory, path: string): RunnerFactory {
   return (opts) => {
     const runner = factory(opts);
-    return async (req) => {
+    const logged: Runner = async (req) => {
       const started = Date.now();
+      let realModel: string | undefined;
+      const onEvent: NonNullable<RunRequest['onEvent']> = (event) => {
+        if (event.type === 'model') realModel = event.model;
+        req.onEvent?.(event);
+      };
       const record = (ok: boolean, output: string): Promise<void> => {
         const line: CallRecord = {
           at: new Date().toISOString(),
           runner: opts.runner ?? 'claude-cli',
-          model: opts.model ?? null,
+          model: realModel ?? opts.model ?? null,
           canEdit: req.canEdit,
           promptChars: req.prompt.length,
           outputChars: output.length,
@@ -38,7 +43,7 @@ export function logCalls(factory: RunnerFactory, path: string): RunnerFactory {
         );
       };
       try {
-        const output = await runner(req);
+        const output = await runner({ ...req, onEvent });
         await record(true, output);
         return output;
       } catch (error) {
@@ -46,5 +51,8 @@ export function logCalls(factory: RunnerFactory, path: string): RunnerFactory {
         throw error;
       }
     };
+    // The footer reads the time limit from the runner: wrapping must not hide it.
+    if (runner.limitFor) logged.limitFor = runner.limitFor;
+    return logged;
   };
 }

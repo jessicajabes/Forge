@@ -176,6 +176,9 @@ export function createLessonsStage(options: LessonsOptions): StageFn {
     try {
       const results = await runSubagents(ctx.runner, specs, {
         maxParallel: ctx.config.subagents.max_parallel,
+        reporter: ctx.reporter,
+        origin: 'lessons',
+        ...(ctx.via ? { via: ctx.via } : {}),
       });
       const ok = assertAllOk(results);
       const candidates = ok

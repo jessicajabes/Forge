@@ -161,7 +161,7 @@ export async function gatherInputs(ctx: RunContext, skillsDir?: string) {
 export async function runDevBatch(
   ctx: RunContext,
   batch: Batch,
-  opts: { skillsDir?: string; feedback?: string } = {},
+  opts: { skillsDir?: string; feedback?: string; reportName?: string } = {},
 ): Promise<string> {
   const inputs = await gatherInputs(ctx, opts.skillsDir);
   const batchMarkdown = batch.tasks
@@ -180,7 +180,7 @@ export async function runDevBatch(
   });
   const report = await ctx.runner({ prompt, files: [], canEdit: true });
   await saveArtifact(
-    join(ctx.run.dir, `dev-batch-${batch.index}.md`),
+    join(ctx.run.dir, opts.reportName ?? `dev-batch-${batch.index}.md`),
     report,
     () => undefined,
   );

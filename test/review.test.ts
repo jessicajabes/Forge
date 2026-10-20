@@ -1,8 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config.js';
 import type { RunContext } from '../src/orchestrator.js';
+import type { ProgressEvent } from '../src/progress.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner, RunnerFactory } from '../src/runner.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { SubagentEscalation } from '../src/subagents.js';
@@ -295,6 +298,27 @@ describe('reviewBatch', () => {
     expect(review).toContain('Motivo da escalada');
   });
 
+  it('sends an act_on item back to the Dev when the fix it claimed is kept, without escalating', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      lead({
+        act_on: [item('Outro')],
+        previous_items: [
+          {
+            ref: 1,
+            decision: 'maintained',
+            reason: 'a correção ficou pela metade',
+          },
+        ],
+      }),
+      APPROVED,
+    ]);
+    const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(result.cycles).toBe(3);
+    expect(s.feedbacks).toHaveLength(2);
+    expect(s.feedbacks[1]).toContain('Sem validação'); // carried back to the Dev
+  });
+
   it('closes a consider item the Dev justified, and approves', async () => {
     const s = await setup([
       lead({ consider: [item('Nome ruim')] }),
@@ -320,10 +344,82 @@ describe('reviewBatch', () => {
     expect(s.leadPrompts[0]).toContain('Reviewer B (m-b)');
   });
 
+  it('reports the reviewer and lead calls through the reporter', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n';
+    const s = await setup([APPROVED], yml);
+    const events: ProgressEvent[] = [];
+    s.ctx.reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: () => undefined, isTTY: false },
+      env: {},
+    });
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const starts = events.filter((e) => e.type === 'call-start');
+    expect(starts.map((e) => e.label)).toEqual([
+      'review · reviewer-A · claude-cli/m-a',
+      'review · lead · claude-cli/padrão do CLI',
+    ]);
+    expect(events.filter((e) => e.type === 'call-end')).toHaveLength(2);
+  });
+
   it('escalates when the lead answers badly three times', async () => {
     const s = await setup(['lixo', 'lixo', 'lixo']);
     await expect(
       reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
     ).rejects.toBeInstanceOf(SubagentEscalation);
+  });
+});
+
+describe('review diff', () => {
+  it('gives the reviewers only a per-file summary when the diff is over the limit', async () => {
+    const t = await setup([APPROVED]);
+    await writeFile(join(t.ctx.cwd, 'big.txt'), 'x'.repeat(70_000));
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix);
+    const prompt = t.reviewerPrompts[0] ?? '';
+    expect(prompt).toContain('over the 60000 limit');
+    expect(prompt).toContain('big.txt');
+    expect(prompt).not.toContain('x'.repeat(1000));
+  });
+
+  it('reads the diff against a base commit, so work already committed is still reviewed', async () => {
+    const t = await setup([APPROVED, APPROVED]);
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: t.ctx.cwd }).toString().trim();
+    const base = git('rev-parse', 'HEAD');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'trabalho já commitado');
+
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix);
+    expect(t.reviewerPrompts[0]).not.toContain('change.txt');
+
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix, { base });
+    expect(t.reviewerPrompts[1]).toContain('change.txt');
+  });
+
+  it('with groupByTask, sends one Dev call per cited task', async () => {
+    const t = await setup([
+      lead({
+        act_on: [
+          item('A', { task: 'T1' }),
+          item('B', { task: 'T2' }),
+          item('C', { task: 'T1' }),
+          item('D', { task: null }),
+        ],
+      }),
+      APPROVED,
+    ]);
+    const seen: number[][] = [];
+    const devFix = async (feedback: string, taskIds: number[]) => {
+      seen.push(taskIds);
+      return t.devFix(feedback);
+    };
+    await reviewBatch(t.ctx, t.batch, t.deps, devFix, { groupByTask: true });
+    expect(seen).toEqual([[1], [2], []]);
+    expect(t.feedbacks[0]).toContain('1. [T1] A');
+    expect(t.feedbacks[0]).toContain('2. [T1] C');
+    expect(t.feedbacks[1]).toContain('1. [T2] B');
   });
 });

@@ -1,11 +1,17 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ArenaEscalation, runArena, safeCommands } from '../src/arena.js';
+import {
+  ArenaEscalation,
+  runArena,
+  runChecks,
+  safeCommands,
+} from '../src/arena.js';
 import { parseConfig } from '../src/config.js';
 import { git } from '../src/git.js';
 import type { RunContext } from '../src/orchestrator.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner, RunnerFactory } from '../src/runner.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { splitBatches } from '../src/steps/dev.js';
@@ -78,7 +84,8 @@ async function setup(opts: Opts = {}) {
     };
   };
   const config = parseConfig(
-    opts.yml ?? 'dev:\n  allowed_commands: [node --version]\n',
+    opts.yml ??
+      'dev:\n  allowed_commands: [node --version]\n  check_commands: [node --version]\n',
   );
   const ctx: RunContext = {
     cwd,
@@ -199,6 +206,18 @@ describe('arena', () => {
     );
   });
 
+  it('when every candidate ends clean with no change, it goes on without escalating', async () => {
+    const s = await setup({ candidate: async () => 'nada a fazer' });
+    const { note } = await runArena(s.ctx, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    expect(note).toContain('Nenhum candidato mudou nada');
+    expect(
+      (await git(s.ctx.cwd, ['worktree', 'list'])).split('\n'),
+    ).toHaveLength(1);
+  });
+
   it('with no survivor, escalates to the human and still removes the worktrees', async () => {
     const s = await setup({
       candidate: async () => {
@@ -284,6 +303,35 @@ describe('arena', () => {
   });
 });
 
+describe('arena labels', () => {
+  it('gives each candidate lines under its own number, runner and model', async () => {
+    const s = await setup({
+      yml: 'dev:\n  allowed_commands: [node --version]\n  arena:\n    models: [m-a, m-b, m-c]\n',
+    });
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    await runArena({ ...s.ctx, reporter }, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    const lines = out.join('').split('\n');
+    for (const [n, m] of [
+      [1, 'm-a'],
+      [2, 'm-b'],
+      [3, 'm-c'],
+    ] as const) {
+      const prefix = `[dev · candidato ${n} · claude-cli/${m}]`;
+      expect(
+        lines.filter((l) => l.startsWith(prefix)).length,
+      ).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
 describe('arena models', () => {
   it('falls back to the Dev model and runner when dev.arena.models is not set', async () => {
     const s = await setup({
@@ -295,4 +343,101 @@ describe('arena models', () => {
       expect(call.runner).toBe('claude-cli');
     }
   });
+});
+
+describe('arena after an interrupted run', () => {
+  it('replaces the worktrees and folders left behind instead of dropping the candidates', async () => {
+    const s = await setup();
+    await mkdir(s.arenaDir, { recursive: true });
+    // one worktree still registered with git, one plain folder with a file in it
+    await git(s.ctx.cwd, [
+      'worktree',
+      'add',
+      '--detach',
+      '-q',
+      join(s.arenaDir, 'candidato-1'),
+      'HEAD',
+    ]);
+    await mkdir(join(s.arenaDir, 'candidato-2'));
+    await writeFile(join(s.arenaDir, 'candidato-2', 'sobra.txt'), 'x');
+
+    await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
+    expect(note).toContain('Iniciados: 3. Entregaram: 3.');
+    expect(existsSync(join(s.arenaDir, 'candidato-2'))).toBe(false);
+  });
+});
+
+describe('arena checks', () => {
+  it('run the check_commands, not the allowed_commands, after the worktrees are gone', async () => {
+    const probe = (dir: string) => `test ! -e ${dir}`;
+    const s = await setup({
+      yml: 'dev:\n  allowed_commands: [node --version]\n  check_commands: [node --version]\n',
+    });
+    // A check that passes only when the first worktree no longer exists
+    s.ctx.config.dev.check_commands = [
+      probe(join(s.arenaDir, 'candidato-1')),
+      'node --version',
+    ];
+    await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
+    expect(note).toContain('candidato-1`: passou');
+    expect(note).toContain('`node --version`: passou');
+  });
+
+  it('default to npm test and npm run lint, without the formatter of allowed_commands', () => {
+    const dev = parseConfig('').dev;
+    expect(dev.check_commands).toEqual(['npm test', 'npm run lint']);
+    expect(dev.allowed_commands).toContain('npx prettier');
+  });
+});
+
+describe('arena worktree progress lines', () => {
+  it('emits start and end lines for creating and for removing the worktrees', async () => {
+    const s = await setup();
+    const out: string[] = [];
+    const types: string[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        if (event.type === 'worktree')
+          types.push(`${event.action}:${event.phase}`);
+      },
+      stream: { write: (text) => out.push(text), isTTY: false },
+      env: {},
+    });
+    await runArena({ ...s.ctx, reporter }, s.batch, {
+      makeRunner: s.makeRunner,
+      io: s.io,
+    });
+    const lines = out.join('').split('\n');
+    // Candidates run in parallel, so each one's lines are checked on their own
+    for (const n of [1, 2, 3]) {
+      const head = `[arena · candidato ${n}]`;
+      const own = lines
+        .filter((l) => l.startsWith(head))
+        .map((l) => l.replace(/ ok em .*/, ' ok em'));
+      expect(own).toEqual([
+        `${head} criar worktree candidato-${n}`,
+        `${head} ok em`,
+        `${head} remover worktree candidato-${n}`,
+        `${head} ok em`,
+      ]);
+    }
+    for (const t of [
+      'create:start',
+      'create:end',
+      'remove:start',
+      'remove:end',
+    ]) {
+      expect(types.filter((x) => x === t)).toHaveLength(3);
+    }
+  });
+});
+
+describe('runChecks', () => {
+  it('does not hang on a command that reads stdin until it ends', async () => {
+    // `cat` with no file reads stdin, like `prettier` with no file
+    const results = await runChecks(process.cwd(), ['cat']);
+    expect(results).toEqual([{ command: 'cat', ok: true, detail: 'passou' }]);
+  }, 10_000);
 });

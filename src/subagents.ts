@@ -1,3 +1,4 @@
+import type { ProgressReporter } from './progressReporter.js';
 import type { Runner } from './runner.js';
 
 export type SubagentSpec = {
@@ -18,7 +19,15 @@ export type SubagentOptions = {
   maxParallel: number;
   /** Failures in a row before giving up on one subagent. The design rule is three. */
   maxAttempts?: number;
+  /** With a reporter, each subagent's calls carry their own label in the progress lines. */
+  reporter?: ProgressReporter | undefined;
+  /** Who is calling, as the start of the label: `recon`, `review`... */
+  origin?: string;
+  /** The runner and model behind `runner`, shown in the label. */
+  via?: RunnerVia;
 };
+
+export type RunnerVia = { runner: string; model?: string | undefined };
 
 /** Raised by `assertAllOk` when a subagent used up its attempts: escalate to the human. */
 export class SubagentEscalation extends Error {
@@ -32,6 +41,57 @@ export class SubagentEscalation extends Error {
     );
     this.name = 'SubagentEscalation';
   }
+}
+
+let nextCallId = 0;
+/** A resumed run appends to the same progress.jsonl: ids must not repeat across processes. */
+const processTag = Date.now().toString(36);
+
+/** A labelled runner remembers the one it wraps, so labelling it again does not nest. */
+const wrapped = new WeakMap<Runner, Runner>();
+
+/** `dev · candidato 2 · claude-cli/sonnet`: the parts that are known, joined. */
+export function originLabel(parts: string[], via?: RunnerVia): string {
+  const who = via ? `${via.runner}/${via.model ?? 'padrão do CLI'}` : undefined;
+  return [...parts, ...(who ? [who] : [])].join(' · ');
+}
+
+/**
+ * Wraps a runner so that each call reports itself under `label`. The `Runner` type does
+ * not change: without a reporter the runner comes back as it is.
+ */
+export function labelRunner(
+  runner: Runner,
+  reporter: ProgressReporter | undefined,
+  label: string,
+  via?: RunnerVia,
+): Runner {
+  if (!reporter) return runner;
+  const base = wrapped.get(runner) ?? runner;
+  const labelled: Runner = (req) => {
+    const limitMs = base.limitFor?.(req.canEdit);
+    return reporter.trackCall(
+      {
+        id: `call-${processTag}-${++nextCallId}`,
+        label,
+        runner: via?.runner ?? 'runner',
+        model: via?.model ?? null,
+        canEdit: req.canEdit,
+        ...(limitMs !== undefined ? { limitMs } : {}),
+      },
+      (onEvent) =>
+        base({
+          ...req,
+          onEvent: (event) => {
+            onEvent(event);
+            req.onEvent?.(event);
+          },
+        }),
+    );
+  };
+  if (base.limitFor) labelled.limitFor = base.limitFor;
+  wrapped.set(labelled, base);
+  return labelled;
 }
 
 async function runOne(
@@ -72,6 +132,7 @@ export async function runSubagents(
   options: SubagentOptions,
 ): Promise<SubagentResult[]> {
   const maxAttempts = options.maxAttempts ?? 3;
+  const origin = options.origin ? [options.origin] : [];
   const results = new Array<SubagentResult>(specs.length);
   let next = 0;
   const worker = async () => {
@@ -79,7 +140,13 @@ export async function runSubagents(
       const index = next++;
       const spec = specs[index];
       if (!spec) return;
-      results[index] = await runOne(runner, spec, maxAttempts);
+      const labelled = labelRunner(
+        runner,
+        options.reporter,
+        originLabel([...origin, spec.id], options.via),
+        options.via,
+      );
+      results[index] = await runOne(labelled, spec, maxAttempts);
     }
   };
   const width = Math.max(1, Math.min(options.maxParallel, specs.length));

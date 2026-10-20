@@ -12,9 +12,9 @@ adapted: true
 
 # Recon
 
-Explore the target repository and write the project context file, `.workflow/context.md`. Later stages (tasks, dev, review) read it so their work follows the patterns already in the project, stays compatible with its technologies, and does not break what exists. Produce an explanation at the level of a senior engineer onboarding onto the project: enough to build a working mental model, not so much that it reads like annotated source code.
+Explore the target repository and produce the project context, which the Forge saves as `.workflow/context.md`. Later stages (tasks, dev, review) read it so their work follows the patterns already in the project, stays compatible with its technologies, and does not break what exists. Produce an explanation at the level of a senior engineer onboarding onto the project: enough to build a working mental model, not so much that it reads like annotated source code.
 
-The Forge runs the roles below. Every one is read-only. Nobody edits files or runs commands.
+The Forge runs the roles below. Every one is read-only. Nobody edits files or runs commands. Nobody writes the context file either: your reply is the file. The Forge saves it as is, so reply with the Markdown only, starting at the `# Project:` title, with no text before or after it and no code fence around it.
 
 ## Question
 
@@ -39,7 +39,7 @@ Three explorers run in parallel, one per angle. Each is built from `references/e
 
 ## 3. Synthesize
 
-Once the explorers have returned, one explainer reconciles their findings and writes the context file, built from `references/explainer-prompt.md`. The Forge saves its output as `.workflow/context.md`.
+Once the explorers have returned, one explainer reconciles their findings and writes the context, built from `references/explainer-prompt.md`. The Forge saves its reply, unchanged, as `.workflow/context.md`.
 
 ## Output format
 

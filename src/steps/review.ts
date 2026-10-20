@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import { parseSpec, saveArtifact } from '../artifacts.js';
-import { workingDiff } from '../git.js';
+import { workingDiff, workingDiffStat } from '../git.js';
 import type { IO } from '../io.js';
 import type { RunContext } from '../orchestrator.js';
 import type { RunnerFactory } from '../runner.js';
@@ -174,6 +174,29 @@ ${notes.length > 0 ? notes.join('\n') : '- nada'}
   return [head, ...blocks].join('\n');
 }
 
+/** Above this many characters the reviewers get a per-file summary and read the files themselves. */
+export const MAX_REVIEW_DIFF_CHARS = 60_000;
+
+async function reviewDiff(cwd: string, base: string): Promise<string> {
+  const diff = await workingDiff(cwd, base);
+  if (diff.length <= MAX_REVIEW_DIFF_CHARS) return diff;
+  const stat = await workingDiffStat(cwd, base);
+  return `The diff has ${diff.length} characters, over the ${MAX_REVIEW_DIFF_CHARS} limit, so only the per-file summary follows. Read the changed files with Read.\n\n${stat}`;
+}
+
+/** The task number an item points at (`T3`, `3`), or null when it names none. */
+function itemTaskId(item: Item): number | null {
+  const m = item.task ? /\bT?(\d+)\b/i.exec(item.task) : null;
+  return m ? Number(m[1]) : null;
+}
+
+export type ReviewOptions = {
+  /** Commit the diff is taken against. Default `HEAD`: the batch is still uncommitted. */
+  base?: string;
+  /** Send the items back to the Dev one call per cited task, not one call for all. */
+  groupByTask?: boolean;
+};
+
 /**
  * The review of one batch (DESIGN 6.1): reviewers in parallel, a lead that sorts the
  * findings, and correction cycles with the Dev. Returns when the batch is approved.
@@ -184,8 +207,9 @@ export async function reviewBatch(
   ctx: RunContext,
   batch: Batch,
   deps: ReviewDeps,
-  /** Sends items back to the Dev and returns its report. */
-  devFix: (feedback: string) => Promise<string>,
+  /** Sends items back to the Dev and returns its report. `taskIds` are the tasks the items cite. */
+  devFix: (feedback: string, taskIds: number[]) => Promise<string>,
+  options: ReviewOptions = {},
 ): Promise<{ cycles: number; reviewPath: string; leftover: Item[] }> {
   const max = ctx.config.max_review_cycles;
   const reviewPath = join(ctx.run.dir, `review-batch-${batch.index}.md`);
@@ -235,7 +259,7 @@ export async function reviewBatch(
   let previous: { sent: SentItem[]; answers: DevAnswer[] } | null = null;
 
   for (let number = 1; number <= max; number++) {
-    const diff = await workingDiff(ctx.cwd);
+    const diff = await reviewDiff(ctx.cwd, options.base ?? 'HEAD');
     const previousBlock = previous
       ? previous.sent
           .map(
@@ -265,6 +289,9 @@ export async function reviewBatch(
           [{ id: `reviewer-${label(i)}`, prompt }],
           {
             maxParallel: 1,
+            reporter: ctx.reporter,
+            origin: 'review',
+            via: { runner: cfg.runner, model: cfg.model || undefined },
           },
         );
         return { label: label(i), model: cfg.model, result: r };
@@ -282,7 +309,15 @@ export async function reviewBatch(
     const [leadResult] = await runSubagents(
       leadRunner,
       [{ id: 'lead', prompt: leadPrompt, validate: parseLead }],
-      { maxParallel: 1 },
+      {
+        maxParallel: 1,
+        reporter: ctx.reporter,
+        origin: 'review',
+        via: {
+          runner: ctx.config.steps.review.runner,
+          model: ctx.config.steps.review.model,
+        },
+      },
     );
     const verdictOk = assertAllOk(leadResult ? [leadResult] : [])[0];
     const verdict = parseLead(verdictOk?.text ?? '');
@@ -317,8 +352,13 @@ export async function reviewBatch(
     }
 
     // 3. An act_on item kept after the Dev's justification: straight to the human.
+    // A fix the Dev claimed but the reviewer found incomplete goes back to the Dev.
     const keptActOn = verdict.previous_items
-      .filter((p) => p.decision === 'maintained')
+      .filter(
+        (p) =>
+          p.decision === 'maintained' &&
+          previous?.answers[p.ref - 1]?.fixed === false,
+      )
       .map((p) => previous?.sent[p.ref - 1])
       .filter((i): i is SentItem => i !== undefined && i.bucket === 'act_on');
     const escalate = async (reason: string): Promise<never> => {
@@ -363,11 +403,32 @@ export async function reviewBatch(
       );
     const toDev = [...sent, ...carried];
     cycle.sent = toDev;
-    const feedback = `${toDev.map((s, i) => `${i + 1}. ${line(s)}${s.suggestion ? ` (suggestion: ${s.suggestion})` : ''}`).join('\n')}
+    const feedbackFor = (items: SentItem[]) =>
+      `${items.map((s, i) => `${i + 1}. ${line(s)}${s.suggestion ? ` (suggestion: ${s.suggestion})` : ''}`).join('\n')}
 
 Answer every item at the end of your report, one line each: \`N. Corrigido: <what you did>\` or \`N. Não corrigido: <justification>\`.`;
-    const report = await devFix(feedback);
-    cycle.answers = parseDevAnswers(report, toDev.length);
+    // One Dev call per cited task keeps each call small; items that cite none go together.
+    const groups: { taskIds: number[]; indexes: number[] }[] = [];
+    if (options.groupByTask) {
+      const byTask = new Map<number | null, number[]>();
+      toDev.forEach((item, i) => {
+        const id = itemTaskId(item);
+        byTask.set(id, [...(byTask.get(id) ?? []), i]);
+      });
+      for (const [id, indexes] of byTask)
+        groups.push({ taskIds: id === null ? [] : [id], indexes });
+    } else {
+      groups.push({ taskIds: [], indexes: toDev.map((_, i) => i) });
+    }
+    const answers: DevAnswer[] = [];
+    for (const group of groups) {
+      const items = group.indexes.map((i) => toDev[i] as SentItem);
+      const report = await devFix(feedbackFor(items), group.taskIds);
+      parseDevAnswers(report, items.length).forEach((answer, k) => {
+        answers[group.indexes[k] as number] = answer;
+      });
+    }
+    cycle.answers = answers;
     previous = { sent: toDev, answers: cycle.answers };
   }
   throw new ReviewEscalation('revisão sem ciclos disponíveis', reviewPath);

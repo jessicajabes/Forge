@@ -9,10 +9,16 @@ import { createCopilotCliRunner } from './runners/copilot-cli.js';
 const io = createReadlineIO();
 
 function makeRunner(config: Config): RunnerFactory {
+  // The limits of `dev` only apply to editing calls; the runners ignore them otherwise
+  const editTimeoutMs =
+    config.dev.timeout_minutes !== undefined
+      ? config.dev.timeout_minutes * 60_000
+      : undefined;
   return (opts) =>
     opts.runner === 'copilot-cli'
       ? createCopilotCliRunner({
           cwd: opts.cwd,
+          ...(editTimeoutMs !== undefined ? { editTimeoutMs } : {}),
           ...(opts.model ? { model: opts.model } : {}),
           ...(opts.allowedCommands
             ? { allowedCommands: opts.allowedCommands }
@@ -21,6 +27,10 @@ function makeRunner(config: Config): RunnerFactory {
       : createClaudeCliRunner({
           cwd: opts.cwd,
           isolated: config.claude.isolated,
+          ...(config.dev.max_turns !== undefined
+            ? { editMaxTurns: config.dev.max_turns }
+            : {}),
+          ...(editTimeoutMs !== undefined ? { editTimeoutMs } : {}),
           ...(opts.model ? { model: opts.model } : {}),
           ...(opts.allowedCommands
             ? { allowedCommands: opts.allowedCommands }
