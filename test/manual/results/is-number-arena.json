@@ -1,0 +1,14 @@
+{
+  "task": "is-number",
+  "config": "arena",
+  "exit_code": null,
+  "seconds": 808,
+  "tests_pass": true,
+  "diff_summary": "2 files changed, 16 insertions(+), 3 deletions(-)",
+  "calls": 20,
+  "prompt_chars": 226782,
+  "output_chars": 43247,
+  "failed_calls": 0,
+  "review_cycles": 2,
+  "review_verdict": "aprovado"
+}

@@ -263,7 +263,7 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `test/manual/README.md` (novo), `test/manual/results.md` (novo)
 - **O que fazer**: Montar 2 ou 3 tarefas reais de tamanhos diferentes em repositórios pessoais ou públicos. Para cada uma, rodar o Forge com arena, o Dev simples e o `claude` direto, e anotar custo relativo, ciclos de revisão e testes passando (seção 7).
 - **Critério de aceite**:
-  - [ ] `results.md` tem, por tarefa, as três configurações com custo relativo, nº de ciclos e se os testes passaram
+  - [x] `results.md` tem, por tarefa, as três configurações com custo relativo, nº de ciclos e se os testes passaram
   - [ ] `results.md` termina com a decisão: o arena continua como padrão ou não
 - **Depende de**: T25
 

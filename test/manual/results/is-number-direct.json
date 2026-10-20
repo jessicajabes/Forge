@@ -1,0 +1,11 @@
+{
+  "task": "is-number",
+  "config": "direct",
+  "exit_code": 0,
+  "seconds": 86,
+  "tests_pass": true,
+  "diff_summary": "2 files changed, 12 insertions(+), 2 deletions(-)",
+  "calls": 1,
+  "turns": 16,
+  "claude_reported_ms": 68968
+}

@@ -1,0 +1,12 @@
+{
+  "task": "is-number",
+  "config": "simple",
+  "exit_code": 1,
+  "seconds": 776,
+  "tests_pass": true,
+  "diff_summary": "2 files changed, 14 insertions(+), 2 deletions(-)",
+  "calls": 14,
+  "prompt_chars": 181556,
+  "output_chars": 37096,
+  "failed_calls": 0
+}
