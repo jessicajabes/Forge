@@ -99,6 +99,8 @@ type Cycle = {
   noted: Item[];
   dismissed: Item[];
   previous: LeadVerdict['previous_items'];
+  /** Reviewer label to model name, as the lead reported it. */
+  models: Record<string, string>;
 };
 
 export class ReviewEscalation extends Error {
@@ -171,7 +173,46 @@ ${previous}### Anotados e descartados (não voltam ao Dev)
 ${notes.length > 0 ? notes.join('\n') : '- nada'}
 `;
   });
-  return [head, ...blocks].join('\n');
+  return [head, ...blocks, renderByTask(cycles)].join('\n');
+}
+
+const NO_TASK = 'Sem task';
+const NO_MODEL = 'modelo não informado';
+
+/** Groups every item of every cycle by task, then by the model of the reviewer that raised it. */
+function renderByTask(cycles: Cycle[]): string {
+  const byTask = new Map<string, Map<string, string[]>>();
+  for (const c of cycles) {
+    const all: [string, Item][] = [
+      ...c.sent.map((i): [string, Item] => [
+        i.bucket === 'act_on' ? 'agir' : 'considerar',
+        i,
+      ]),
+      ...c.noted.map((i): [string, Item] => ['anotado', i]),
+      ...c.dismissed.map((i): [string, Item] => ['descartado', i]),
+    ];
+    for (const [kind, i] of all) {
+      const id = itemTaskId(i);
+      const task = id === null ? NO_TASK : `T${id}`;
+      const models = i.raised_by.map((l) => c.models[l] || `revisor ${l}`);
+      for (const model of models.length > 0 ? models : [NO_MODEL]) {
+        const tasks = byTask.get(task) ?? new Map<string, string[]>();
+        tasks.set(model, [
+          ...(tasks.get(model) ?? []),
+          `- (ciclo ${c.number}, ${kind}) ${i.title}: ${i.description}`,
+        ]);
+        byTask.set(task, tasks);
+      }
+    }
+  }
+  const order = (t: string) => (t === NO_TASK ? Infinity : Number(t.slice(1)));
+  const blocks = [...byTask.entries()]
+    .sort(([a], [b]) => order(a) - order(b))
+    .map(
+      ([task, models]) =>
+        `### ${task}\n${[...models.entries()].map(([model, lines]) => `#### ${model}\n${lines.join('\n')}`).join('\n')}`,
+    );
+  return `## Apontamentos por task e por modelo\n${blocks.length > 0 ? blocks.join('\n') : '- nenhum apontamento'}\n`;
 }
 
 /** Above this many characters the reviewers get a per-file summary and read the files themselves. */
@@ -346,6 +387,10 @@ export async function reviewBatch(
       noted: verdict.noted,
       dismissed: verdict.dismissed,
       previous: verdict.previous_items,
+      models: Object.fromEntries([
+        ...results.map((r) => [r.label, r.model] as const),
+        ...verdict.reviewers.map((r) => [r.label, r.model] as const),
+      ]),
     };
     cycles.push(cycle);
 

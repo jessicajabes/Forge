@@ -375,6 +375,33 @@ describe('reviewBatch', () => {
     expect(events.filter((e) => e.type === 'call-end')).toHaveLength(2);
   });
 
+  it('groups the findings in the report by task and by reviewer model', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n      - { runner: copilot-cli, model: m-b }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [
+            item('falha-um', { task: 'T1', raised_by: ['A'] }),
+            item('falha-dois', { task: 'T2', raised_by: ['B'] }),
+          ],
+          noted: [item('nota-um', { task: 'T1', raised_by: ['B'] })],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    const section = report.slice(
+      report.indexOf('## Apontamentos por task e por modelo'),
+    );
+    expect(section).toMatch(
+      /### T1\n#### m-a\n- \(ciclo 1, agir\) falha-um[^\n]*\n#### m-b\n- \(ciclo 1, anotado\) nota-um[^\n]*\n### T2\n#### m-b\n- \(ciclo 1, agir\) falha-dois/,
+    );
+    expect(section).not.toMatch(/#### m-a\n- [^\n]*falha-dois/);
+  });
+
   it('escalates when the lead answers badly three times', async () => {
     const s = await setup(['lixo', 'lixo', 'lixo']);
     await expect(
