@@ -2,6 +2,7 @@ import type { Config } from './config.js';
 import { readState, writeState } from './state.js';
 import type { Run } from './runs.js';
 import type { Runner } from './runner.js';
+import type { ProgressReporter } from './progressReporter.js';
 
 /**
  * The stages of DESIGN section 1, plus the human stop of 4.10 between Tasks and Dev.
@@ -29,6 +30,8 @@ export type RunContext = {
   run: Run;
   config: Config;
   runner: Runner;
+  /** Where the stage lines go. Absent: the stages run without progress output. */
+  reporter?: ProgressReporter;
 };
 
 export type StageFn = (ctx: RunContext) => Promise<void>;
@@ -55,6 +58,9 @@ export type RunResult = {
  *
  * Progress is saved in the run folder after every stage. Calling it again on the same
  * run folder resumes: stages that already completed are not repeated (3.3).
+ *
+ * With a reporter, each stage gets an entry line with its position and an exit line with
+ * its duration. Skipped stages (the Grill of a trivial task) are not counted.
  */
 export async function runWorkflow(
   ctx: RunContext,
@@ -75,18 +81,32 @@ export async function runWorkflow(
     });
 
   await save('running');
-  for (const name of PIPELINE) {
-    if (name === 'grill' && ctx.size === 'trivial') continue;
+  const planned = PIPELINE.filter(
+    (name) => !(name === 'grill' && ctx.size === 'trivial'),
+  );
+  for (const [position, name] of planned.entries()) {
     if (completed.has(name)) continue;
+    const stage = { stage: name, index: position + 1, total: planned.length };
+    const started = Date.now();
+    const reportEnd = () =>
+      ctx.reporter?.report({
+        type: 'stage',
+        phase: 'end',
+        ...stage,
+        ms: Date.now() - started,
+      });
+    await ctx.reporter?.report({ type: 'stage', phase: 'start', ...stage });
     try {
       await stages[name](ctx);
     } catch (error) {
+      await reportEnd();
       if (error instanceof RunCancelled) {
         await save('cancelled');
         return { status: 'cancelled', stagesRun };
       }
       throw error;
     }
+    await reportEnd();
     completed.add(name);
     stagesRun.push(name);
     await save('running');

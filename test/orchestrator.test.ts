@@ -8,6 +8,8 @@ import {
   runWorkflow,
   type RunContext,
 } from '../src/orchestrator.js';
+import type { ProgressEvent } from '../src/progress.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import { createRun } from '../src/runs.js';
 import { stubStages } from '../src/steps/stub.js';
 import { createFakeRunner } from './fakeRunner.js';
@@ -97,6 +99,71 @@ describe('runWorkflow', () => {
     expect(
       await readFile(join(base.cwd, '.workflow', 'lessons.md'), 'utf-8'),
     ).toBe('- lição');
+  });
+
+  it('emits an entry and an exit line for each stage, in order', async () => {
+    const base = await setup('complete');
+    const fake = createFakeRunner([
+      SPEC,
+      'contexto',
+      TASKS,
+      'dev feito',
+      'revisão ok',
+      '- lição',
+    ]);
+    const events: ProgressEvent[] = [];
+    const lines: string[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: (text) => lines.push(text) },
+      env: {},
+    });
+    await runWorkflow({ ...base, runner: fake.runner, reporter }, stubStages());
+
+    const stageEvents = events.flatMap((e) => (e.type === 'stage' ? [e] : []));
+    expect(
+      stageEvents.map((e) => [e.stage, e.phase, e.index, e.total]),
+    ).toEqual(
+      PIPELINE.flatMap((name, i) => [
+        [name, 'start', i + 1, 6],
+        [name, 'end', i + 1, 6],
+      ]),
+    );
+    expect(lines[0]).toContain('etapa grill (1/6)');
+    expect(lines.some((l) => l.includes('etapa build (5/6)'))).toBe(true);
+    expect(lines).toHaveLength(12);
+  });
+
+  it('does not count the skipped Grill in the stage positions', async () => {
+    const base = await setup('trivial');
+    const fake = createFakeRunner([
+      'contexto',
+      TASKS,
+      'dev feito',
+      'revisão ok',
+      '- lição',
+    ]);
+    const events: ProgressEvent[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: () => true },
+      quiet: true,
+    });
+    await runWorkflow({ ...base, runner: fake.runner, reporter }, stubStages());
+    const starts = events.flatMap((e) =>
+      e.type === 'stage' && e.phase === 'start' ? [e] : [],
+    );
+    expect(starts.map((e) => `${e.stage} ${e.index}/${e.total}`)).toEqual([
+      'recon 1/5',
+      'tasks 2/5',
+      'approve 3/5',
+      'build 4/5',
+      'lessons 5/5',
+    ]);
   });
 
   it('skips the Grill on a trivial task', async () => {
