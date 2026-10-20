@@ -109,7 +109,7 @@ Each run has its own folder, `.workflow/runs/<date>-<slug>/`, with `spec.md`, `t
 
 Copy [`.workflow.example.yml`](.workflow.example.yml) to `.workflow.yml` in the target repository. Every field is optional. You can pick a runner and a model per stage, several reviewers of different models, the number of arena candidates, one model per candidate, and the arena judge. `dev.batching: per_task` makes one Dev call per task (each committed as it ends) while the review stays at the end. Editing calls have no turn or time limit unless you set `dev.max_turns` or `dev.timeout_minutes`. `dev.check_commands` (default `npm test` and `npm run lint`) is what the arena runs on the integrated result, apart from `dev.allowed_commands`, which is what a candidate may run.
 
-Without a config, everything runs on `claude-cli` with Claude Code's default model, with 3 arena candidates, review at the end, and at most 3 review cycles.
+Without a config, everything runs on `claude-cli` with Claude Code's default model, with 3 arena candidates, review at the end, and at most 10 review cycles.
 
 ## Credentials and terms of use
 

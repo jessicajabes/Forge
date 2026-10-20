@@ -53,7 +53,7 @@ const configSchema = z
         review: { runner: 'claude-cli', reviewers: [] },
       }),
     review_mode: z.enum(['final', 'per_task']).default('final'),
-    max_review_cycles: z.number().int().positive().default(3),
+    max_review_cycles: z.number().int().positive().default(10),
     max_lessons: z.number().int().positive().default(30),
     max_context_tokens: z
       .object({

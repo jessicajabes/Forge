@@ -15,7 +15,7 @@ describe('config', () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
     const config = await loadConfig(dir);
     expect(config.review_mode).toBe('final');
-    expect(config.max_review_cycles).toBe(3);
+    expect(config.max_review_cycles).toBe(10);
     expect(config.dev.arena.candidates).toBe(3);
     expect(config.dev.allowed_commands).toEqual([
       'npm test',
@@ -23,6 +23,11 @@ describe('config', () => {
       'npx prettier',
     ]);
     expect(config.claude.isolated).toBe(true);
+  });
+
+  it('defaults max_review_cycles to 10 and honors an explicit value', () => {
+    expect(parseConfig('').max_review_cycles).toBe(10);
+    expect(parseConfig('max_review_cycles: 2').max_review_cycles).toBe(2);
   });
 
   it('keeps claude.isolated true unless it is turned off explicitly', () => {

@@ -199,7 +199,7 @@ describe('reviewBatch', () => {
     expect(review).toContain('## Ciclo 1: reprovado');
     expect(review).toContain('1. Corrigido: ok');
     expect(review).toContain('## Ciclo 2: aprovado');
-    expect(review).toContain('- **Ciclos realizados**: 2 de 3');
+    expect(review).toContain('- **Ciclos realizados**: 2 de 10');
   });
 
   it('shows the second cycle the Dev answers to the first', async () => {
@@ -240,7 +240,7 @@ describe('reviewBatch', () => {
 
   it('at the cycle limit, an open act_on item escalates to the human with review.md saved', async () => {
     const still = lead({ act_on: [item('Bug aberto')] });
-    const s = await setup([still, still, still]);
+    const s = await setup([still, still, still], 'max_review_cycles: 3');
     await expect(
       reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
     ).rejects.toBeInstanceOf(ReviewEscalation);
@@ -252,7 +252,7 @@ describe('reviewBatch', () => {
 
   it('at the cycle limit, only consider items left means the batch is approved and the leftovers are noted', async () => {
     const still = lead({ consider: [item('Detalhe de estilo')] });
-    const s = await setup([still, still, still]);
+    const s = await setup([still, still, still], 'max_review_cycles: 3');
     const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
     expect(result.cycles).toBe(3);
     expect(result.leftover.map((i) => i.title)).toEqual(['Detalhe de estilo']);

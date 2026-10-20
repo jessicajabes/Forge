@@ -112,7 +112,7 @@ describe('build stage', () => {
     await stage()(ctx);
     const review = await readFile(join(ctx.run.dir, 'review.md'), 'utf-8');
     expect(review).toContain('- **Veredito**: aprovado');
-    expect(review).toContain('- **Ciclos realizados**: 1 de 3');
+    expect(review).toContain('- **Ciclos realizados**: 1 de 10');
   });
 
   it('with several batches, review.md has one section per batch', async () => {

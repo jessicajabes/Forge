@@ -299,7 +299,7 @@ describe('forge-jj', () => {
       1,
     );
     expect(io.output()).toContain('Parei para você decidir');
-    expect(io.output()).toContain('limite de 3 ciclos');
+    expect(io.output()).toContain('limite de 10 ciclos');
   });
 
   it('cancelling at the human stop ends cleanly', async () => {

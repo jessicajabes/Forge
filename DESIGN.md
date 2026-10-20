@@ -137,7 +137,7 @@ claude:
       - { runner: claude-cli, model: <modelo A> }
       - { runner: copilot-cli, model: <modelo B> }
 review_mode: final        # final | per_task
-max_review_cycles: 3
+max_review_cycles: 10
 max_lessons: 30
 max_context_tokens:       # por conversa com o modelo; valores iniciais são estimativas
   warn: 80000
@@ -341,7 +341,7 @@ Uma linha de Markdown por lição: a regra em uma frase, a data e a tarefa de or
 ## 6. Revisão e aprendizado
 
 ### 6.1 Ciclos de revisão
-- O líder da revisão (skill `review`) classifica os achados em quatro grupos: `act_on`, `consider`, `noted` e `dismissed`. **Reprova se houver qualquer item em `act_on` ou `consider`**, e o fluxo volta ao Dev com esses itens numerados. `noted` e `dismissed` ficam registrados no `review.md`, mas não voltam ao Dev nem gastam ciclo. Limite padrão de **3 ciclos** (`max_review_cycles`). **Ao chegar no limite, se sobrarem só itens `consider` (nenhum `act_on`), o lote é aprovado** e os itens restantes ficam anotados no `review.md`, sem voltar ao Dev: o revisor tende a inflar detalhes, e um lote que passa nos testes não deve ficar preso por isso (decidido depois do teste real da T27). Um `act_on` aberto continua escalando ao humano.
+- O líder da revisão (skill `review`) classifica os achados em quatro grupos: `act_on`, `consider`, `noted` e `dismissed`. **Reprova se houver qualquer item em `act_on` ou `consider`**, e o fluxo volta ao Dev com esses itens numerados. `noted` e `dismissed` ficam registrados no `review.md`, mas não voltam ao Dev nem gastam ciclo. Limite padrão de **10 ciclos** (`max_review_cycles`). **Ao chegar no limite, se sobrarem só itens `consider` (nenhum `act_on`), o lote é aprovado** e os itens restantes ficam anotados no `review.md`, sem voltar ao Dev: o revisor tende a inflar detalhes, e um lote que passa nos testes não deve ficar preso por isso (decidido depois do teste real da T27). Um `act_on` aberto continua escalando ao humano.
 - Para cada problema, o Dev responde `corrigido` ou `não corrigido, com justificativa`.
 - No ciclo seguinte, o revisor lê a justificativa e aceita ou mantém a exigência. Um item `consider` respondido com justificativa é encerrado, a menos que o líder o promova a `act_on`. Se um item `act_on` for mantido, o fluxo **escala direto ao humano**, sem gastar os ciclos restantes, com os dois lados lado a lado no `review.md`.
 - Ao estourar o limite com um `act_on` aberto, o fluxo também para e entrega o `review.md` com o que sobrou. Com só `consider` aberto, o lote é aprovado (ver acima).
