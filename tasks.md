@@ -222,10 +222,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/steps/lessons.ts` (novo), `test/lessons.test.ts` (novo)
 - **O que fazer**: Propor lições a partir do `review.md` e pedir `sim`, `não` ou `editar` para cada uma. Nada é gravado sem aprovação. Limite de 30 lições: ao passar, mostrar as antigas para remover ou juntar (6.2).
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para aprovar, recusar, editar e o limite de 30 lições
-  - [ ] Teste prova que nada é gravado sem aprovação
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para aprovar, recusar, editar e o limite de 30 lições
+  - [x] Teste prova que nada é gravado sem aprovação
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T9, T21, T22
 
 ## T24: Runner `copilot-cli`
