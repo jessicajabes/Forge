@@ -142,3 +142,44 @@ describe('resume', () => {
     expect((await findIncompleteRun(cwd))?.run.dir).toBe(second.run.dir);
   });
 });
+
+describe('resume keeps the branch name and the local date', () => {
+  it('a resumed run gets the same slug, so the branch is forge/<slug> and not forge/<date>-<slug>', async () => {
+    const cwd = await makeRepo();
+    const base = await ctxFor(cwd, 'adicionar login');
+    const stages = stubStages();
+    stages.grill = async () => {
+      throw new Error('queda');
+    };
+    await runWorkflow(
+      { ...base, runner: createFakeRunner([]).runner },
+      stages,
+    ).catch(() => undefined);
+    const found = await findIncompleteRun(cwd);
+    expect(found?.run.slug).toBe('adicionar-login');
+    expect(found?.run.id).toMatch(/^\d{4}-\d{2}-\d{2}-adicionar-login$/);
+  });
+
+  it('a state saved before the slug existed falls back to the id without its date', async () => {
+    const cwd = await makeRepo();
+    const base = await ctxFor(cwd, 'tarefa antiga');
+    const { writeFile, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const stages = stubStages();
+    stages.grill = async () => {
+      throw new Error('queda');
+    };
+    await runWorkflow(
+      { ...base, runner: createFakeRunner([]).runner },
+      stages,
+    ).catch(() => undefined);
+    const path = join(base.run.dir, 'state.json');
+    const state = JSON.parse(await readFile(path, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    delete state['slug'];
+    await writeFile(path, JSON.stringify(state));
+    expect((await findIncompleteRun(cwd))?.run.slug).toBe('tarefa-antiga');
+  });
+});

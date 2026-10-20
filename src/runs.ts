@@ -20,6 +20,12 @@ export function slugify(text: string): string {
   return slug || 'tarefa';
 }
 
+/** `YYYY-MM-DD` in the machine's time zone, so a run at 21h in Brasília is not dated tomorrow. */
+export function localDate(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 export type Run = {
   id: string;
   slug: string;
@@ -33,7 +39,7 @@ export async function createRun(
   now: Date = new Date(),
 ): Promise<Run> {
   const slug = slugify(task);
-  const date = now.toISOString().slice(0, 10);
+  const date = localDate(now);
   const runs = join(workflowDir(cwd), 'runs');
   await mkdir(runs, { recursive: true });
   for (let n = 1; ; n++) {

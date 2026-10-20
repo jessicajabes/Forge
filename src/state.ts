@@ -9,6 +9,8 @@ export const NOTHING_TO_RESUME = 'Não há execução incompleta para retomar.';
 
 const stateSchema = z.object({
   task: z.string(),
+  /** Kept so a resumed run names its branch like the first attempt did. Old files lack it. */
+  slug: z.string().optional(),
   size: z.enum(['complete', 'trivial']),
   /** Stages that ran to the end, in order. */
   completed: z.array(z.string()),
@@ -62,7 +64,9 @@ export async function findIncompleteRun(
     const state = await readState(dir);
     if (!state || state.status !== 'running') continue;
     if (!best || state.updatedAt > best.state.updatedAt) {
-      best = { run: { id, slug: id, dir }, state };
+      // runs saved before `slug` existed: the id is `<date>-<slug>[-n]`
+      const slug = state.slug ?? id.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+      best = { run: { id, slug, dir }, state };
     }
   }
   return best;

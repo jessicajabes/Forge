@@ -123,3 +123,22 @@ describe('preflight when resuming', () => {
     ).toBe('protected-branch');
   });
 });
+
+describe('run date', () => {
+  it('uses the machine time zone: 21h18 in Brasília is not dated tomorrow', async () => {
+    const previous = process.env['TZ'];
+    process.env['TZ'] = 'America/Sao_Paulo';
+    try {
+      const cwd = await makeRepo();
+      const run = await createRun(
+        cwd,
+        'fuso',
+        new Date('2026-10-20T00:18:00Z'),
+      );
+      expect(run.id).toBe('2026-10-19-fuso');
+    } finally {
+      if (previous === undefined) delete process.env['TZ'];
+      else process.env['TZ'] = previous;
+    }
+  });
+});

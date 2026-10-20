@@ -68,6 +68,7 @@ export async function runWorkflow(
   const save = (status: 'running' | 'completed' | 'cancelled') =>
     writeState(ctx.run.dir, {
       task: ctx.task,
+      slug: ctx.run.slug,
       size: ctx.size,
       completed: [...completed],
       status,
