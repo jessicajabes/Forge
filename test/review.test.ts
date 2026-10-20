@@ -45,6 +45,7 @@ const lead = (o: {
   dismissed?: object[];
   previous_items?: object[];
   verdict?: string;
+  reviewers?: object[];
 }) =>
   JSON.stringify({
     verdict: 'rejected',
@@ -174,6 +175,16 @@ describe('reviewBatch', () => {
     );
   });
 
+  it('inserts the diff literally, without expanding $& or repeated tokens', async () => {
+    const s = await setup([APPROVED]);
+    await writeFile(
+      join(s.ctx.cwd, 'change.txt'),
+      'custo $& e o texto {LESSONS}\n',
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(s.reviewerPrompts[0]).toContain('custo $& e o texto {LESSONS}');
+  });
+
   it('rejects, sends the numbered items to the Dev, and approves in the next cycle', async () => {
     const s = await setup([
       lead({ act_on: [item('Sem validação')], consider: [item('Nome ruim')] }),
@@ -189,7 +200,7 @@ describe('reviewBatch', () => {
     expect(review).toContain('## Ciclo 1: reprovado');
     expect(review).toContain('1. Corrigido: ok');
     expect(review).toContain('## Ciclo 2: aprovado');
-    expect(review).toContain('- **Ciclos realizados**: 2 de 3');
+    expect(review).toContain('- **Ciclos realizados**: 2 de 10');
   });
 
   it('shows the second cycle the Dev answers to the first', async () => {
@@ -230,7 +241,7 @@ describe('reviewBatch', () => {
 
   it('at the cycle limit, an open act_on item escalates to the human with review.md saved', async () => {
     const still = lead({ act_on: [item('Bug aberto')] });
-    const s = await setup([still, still, still]);
+    const s = await setup([still, still, still], 'max_review_cycles: 3');
     await expect(
       reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
     ).rejects.toBeInstanceOf(ReviewEscalation);
@@ -242,7 +253,7 @@ describe('reviewBatch', () => {
 
   it('at the cycle limit, only consider items left means the batch is approved and the leftovers are noted', async () => {
     const still = lead({ consider: [item('Detalhe de estilo')] });
-    const s = await setup([still, still, still]);
+    const s = await setup([still, still, still], 'max_review_cycles: 3');
     const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
     expect(result.cycles).toBe(3);
     expect(result.leftover.map((i) => i.title)).toEqual(['Detalhe de estilo']);
@@ -363,6 +374,84 @@ describe('reviewBatch', () => {
       'review · lead · claude-cli/padrão do CLI',
     ]);
     expect(events.filter((e) => e.type === 'call-end')).toHaveLength(2);
+  });
+
+  it('groups the findings in the report by task and by reviewer model', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n      - { runner: copilot-cli, model: m-b }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [
+            item('falha-um', { task: 'T1', raised_by: ['A'] }),
+            item('falha-dois', { task: 'T2', raised_by: ['B'] }),
+          ],
+          noted: [item('nota-um', { task: 'T1', raised_by: ['B'] })],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    const section = report.slice(
+      report.indexOf('## Apontamentos por task e por modelo'),
+    );
+    expect(section).toMatch(
+      /### T1\n#### m-a\n- \(ciclo 1, agir\) falha-um[^\n]*\n#### m-b\n- \(ciclo 1, anotado\) nota-um[^\n]*\n### T2\n#### m-b\n- \(ciclo 1, agir\) falha-dois/,
+    );
+    expect(section).not.toMatch(/#### m-a\n- [^\n]*falha-dois/);
+  });
+
+  it('keeps the configured model over the one the lead reports', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [item('falha-um', { task: 'T1', raised_by: ['A'] })],
+          reviewers: [{ label: 'A', model: 'inventado', findings: 1 }],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('#### m-a\n');
+    expect(report).not.toContain('#### inventado');
+  });
+
+  it('names the reviewer by the reported model, then by the runner, when the config has no model', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: "" }\n      - { runner: copilot-cli, model: "" }\n';
+    const s = await setup(
+      [
+        lead({
+          act_on: [
+            item('falha-um', { raised_by: ['A'] }),
+            item('falha-dois', { raised_by: ['B'] }),
+          ],
+          reviewers: [{ label: 'A', model: 'inventado', findings: 1 }],
+        }),
+        APPROVED,
+      ],
+      yml,
+    );
+    const inner = s.deps.makeRunner;
+    s.deps.makeRunner = (o) => {
+      const r = inner(o);
+      return (req) => {
+        if (o.runner === 'claude-cli')
+          req.onEvent?.({ type: 'model', model: 'real-model' });
+        return r(req);
+      };
+    };
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('#### real-model\n');
+    expect(report).toContain('#### copilot-cli\n');
+    expect(report).not.toContain('#### inventado');
   });
 
   it('escalates when the lead answers badly three times', async () => {

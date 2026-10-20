@@ -1,3 +1,4 @@
+import type { RunnerName } from './config.js';
 /** What a runner may report while it works, when the provider exposes it. */
 export type RunnerEvent =
   | { type: 'model'; model: string }
@@ -60,7 +61,7 @@ export type RunnerFactory = (opts: {
   /** Where the agent works: the target repo or a worktree. */
   cwd: string;
   model?: string;
-  runner?: 'claude-cli' | 'copilot-cli';
+  runner?: RunnerName;
   /** The only shell commands an editing run may use. */
   allowedCommands?: string[];
 }) => Runner;

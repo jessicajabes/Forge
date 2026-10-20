@@ -127,7 +127,10 @@ describe('arena', () => {
     const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
     expect(note).toContain('Iniciados: 3. Entregaram: 3.');
     expect(note).toContain('base recomendada: candidato 2');
-    expect(note).toContain('## Arena note');
+    expect(note).toContain('## Nota do integrador');
+    expect(note).toContain('- **Enxertos**: nenhum');
+    expect(note).not.toContain('Arena note');
+    expect(note).not.toContain('Grafts');
     expect(note).toContain('`node --version`: passou');
     expect(existsSync(join(s.arenaDir, 'rubric.md'))).toBe(true);
 

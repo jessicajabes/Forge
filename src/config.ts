@@ -10,7 +10,7 @@ export class ConfigError extends Error {
   }
 }
 
-const runnerName = z.enum(['claude-cli', 'copilot-cli']);
+const runnerName = z.enum(['claude-cli', 'copilot-cli', 'antigravity-cli']);
 export type RunnerName = z.infer<typeof runnerName>;
 
 const stepConfig = z
@@ -52,8 +52,9 @@ const configSchema = z
         lessons: { runner: 'claude-cli' },
         review: { runner: 'claude-cli', reviewers: [] },
       }),
-    review_mode: z.enum(['final', 'per_task']).default('final'),
-    max_review_cycles: z.number().int().positive().default(3),
+    // Not set: resolved after the parse (per_task, or final when dev.batching is all)
+    review_mode: z.enum(['final', 'per_task']).optional(),
+    max_review_cycles: z.number().int().positive().default(10),
     max_lessons: z.number().int().positive().default(30),
     max_context_tokens: z
       .object({
@@ -108,7 +109,13 @@ const configSchema = z
   .refine((c) => !(c.review_mode === 'per_task' && c.dev.batching === 'all'), {
     message:
       'review_mode: per_task exige um Dev por tarefa; troque dev.batching para per_task ou tire essa linha',
-  });
+  })
+  .transform((c) => ({
+    ...c,
+    // Implicit default: per_task, unless the config already batches everything
+    review_mode:
+      c.review_mode ?? (c.dev.batching === 'all' ? 'final' : 'per_task'),
+  }));
 
 export type Config = z.infer<typeof configSchema>;
 

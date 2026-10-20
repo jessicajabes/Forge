@@ -75,9 +75,9 @@ const commitsAhead = (cwd: string) =>
 
 describe('build stage', () => {
   it('works on a branch forge/<slug> and makes one commit for the whole run in final mode', async () => {
-    const { ctx, edits } = await setup();
+    const { ctx, edits } = await setup('review_mode: final');
     await stage()(ctx);
-    expect(await currentBranch(ctx.cwd)).toBe('forge/adicionar-coisas');
+    expect(await currentBranch(ctx.cwd)).toMatch(/^forge\/[a-z]+-[a-z]+$/);
     expect(edits).toEqual([true]);
     expect(await commitsAhead(ctx.cwd)).toBe('1');
     const message = await git(ctx.cwd, ['log', '-1', '--format=%B']);
@@ -112,7 +112,7 @@ describe('build stage', () => {
     await stage()(ctx);
     const review = await readFile(join(ctx.run.dir, 'review.md'), 'utf-8');
     expect(review).toContain('- **Veredito**: aprovado');
-    expect(review).toContain('- **Ciclos realizados**: 1 de 3');
+    expect(review).toContain('- **Ciclos realizados**: 1 de 10');
   });
 
   it('with several batches, review.md has one section per batch', async () => {
@@ -164,7 +164,7 @@ describe('build stage', () => {
 });
 
 describe('build stage with dev.batching per_task and the review at the end', () => {
-  const yml = 'dev: { batching: per_task }';
+  const yml = 'review_mode: final\ndev: { batching: per_task }';
   const finding = (title: string, taskId: string) => ({
     task: taskId,
     title,

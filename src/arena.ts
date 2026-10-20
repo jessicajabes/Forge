@@ -26,6 +26,22 @@ import { buildDevPrompt, gatherInputs, type Batch } from './steps/dev.js';
 
 const execFileAsync = promisify(execFile);
 
+// The integrator prompt asks for English labels (parsed below); the saved note shows Portuguese.
+const NOTE_LABELS: [string, string][] = [
+  ['## Arena note', '## Nota do integrador'],
+  ['- **Judge verdict**:', '- **Veredito do juiz**:'],
+  ['- **Grafts**:', '- **Enxertos**:'],
+  ['- **Rejected**:', '- **Descartado**:'],
+  ['- **Convergence or dropouts**:', '- **Convergência ou desistências**:'],
+];
+
+export function translateArenaNote(text: string): string {
+  return NOTE_LABELS.reduce(
+    (out, [from, to]) => out.split(from).join(to),
+    text,
+  );
+}
+
 /** The Forge stops and shows the human what happened (DESIGN 4.14, edge cases). */
 export class ArenaEscalation extends Error {
   constructor(message: string) {
@@ -446,8 +462,9 @@ Nenhum candidato mudou nada: ${cfg.candidates} candidatos rodaram sem erro e a t
           `divergência total: o integrador não achou uma base razoável.\n${integrated.trim()}`,
         );
       }
-      integrationText =
-        /## Arena note[\s\S]*$/.exec(integrated)?.[0] ?? integrated.trim();
+      integrationText = translateArenaNote(
+        /## Arena note[\s\S]*$/.exec(integrated)?.[0] ?? integrated.trim(),
+      );
     }
 
     // 5. Verify the result with the project's own commands. The worktrees go first: they

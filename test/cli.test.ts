@@ -157,8 +157,8 @@ describe('forge-jj', () => {
       'lens',
       'lens',
     ]);
-    expect(await git(cwd, ['branch', '--show-current'])).toBe(
-      'forge/corrigir-o-typo',
+    expect(await git(cwd, ['branch', '--show-current'])).toMatch(
+      /^forge\/[a-z]+-[a-z]+$/,
     );
     expect(await git(cwd, ['rev-list', '--count', 'feature/x..HEAD'])).toBe(
       '1',
@@ -229,7 +229,7 @@ describe('forge-jj', () => {
     await main(['x'], asked.d);
     expect(asked.io.output()).toContain('Qual o tamanho da tarefa?');
     expect(asked.io.output()).toContain('Como revisar?');
-    expect(asked.s.configs[0]?.review_mode).toBe('final');
+    expect(asked.s.configs[0]?.review_mode).toBe('per_task');
   });
 
   it('--review per_task and --no-arena change the config the run uses', async () => {
@@ -299,7 +299,7 @@ describe('forge-jj', () => {
       1,
     );
     expect(io.output()).toContain('Parei para você decidir');
-    expect(io.output()).toContain('limite de 3 ciclos');
+    expect(io.output()).toContain('limite de 10 ciclos');
   });
 
   it('cancelling at the human stop ends cleanly', async () => {

@@ -9,7 +9,7 @@ import {
   type ProgressReporterOptions,
 } from './progressReporter.js';
 import { SubagentEscalation, labelRunner, originLabel } from './subagents.js';
-import { loadConfig, type Config } from './config.js';
+import { loadConfig, type Config, type RunnerName } from './config.js';
 import type { IO } from './io.js';
 import {
   runWorkflow,
@@ -157,7 +157,7 @@ function withRunner(
   stageName: string,
   ctxStage: StageFn,
   pick: (config: Config) => {
-    runner: 'claude-cli' | 'copilot-cli';
+    runner: RunnerName;
     model?: string | undefined;
   } | null,
   make: RunnerFactory,

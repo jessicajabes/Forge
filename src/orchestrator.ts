@@ -75,10 +75,12 @@ export async function runWorkflow(
     previous?.status === 'running' ? previous.completed : [],
   );
   const stagesRun: StageName[] = [];
-  const save = (status: 'running' | 'completed' | 'cancelled') =>
+  const save = async (status: 'running' | 'completed' | 'cancelled') =>
     writeState(ctx.run.dir, {
       task: ctx.task,
       slug: ctx.run.slug,
+      // the Dev stage records its branch while the pipeline runs; keep it
+      branch: (await readState(ctx.run.dir))?.branch,
       size: ctx.size,
       completed: [...completed],
       status,

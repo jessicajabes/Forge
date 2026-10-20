@@ -95,7 +95,7 @@ describe('human stop', () => {
 describe('estimateDevCost', () => {
   it('is relative: 6 calls per batch with 3 candidates', () => {
     const e = estimateDevCost({
-      config: parseConfig(''),
+      config: parseConfig('review_mode: final'),
       taskCount: 3,
       size: 'complete',
     });

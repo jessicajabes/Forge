@@ -63,6 +63,31 @@ export async function branchExists(
   }
 }
 
+/**
+ * Branch names that start with `prefix`, from local branches and from remote-tracking
+ * refs (the remote name is stripped, so `origin/forge/x` becomes `forge/x`). Names are
+ * unique.
+ */
+export async function listBranches(
+  cwd: string,
+  prefix = '',
+): Promise<string[]> {
+  const out = await git(cwd, [
+    'for-each-ref',
+    '--format=%(refname)',
+    'refs/heads',
+    'refs/remotes',
+  ]);
+  const names = new Set<string>();
+  for (const ref of out === '' ? [] : out.split('\n')) {
+    const name = ref.startsWith('refs/heads/')
+      ? ref.slice('refs/heads/'.length)
+      : ref.replace(/^refs\/remotes\/[^/]+\//, '');
+    if (name.startsWith(prefix)) names.add(name);
+  }
+  return [...names];
+}
+
 export async function checkout(
   cwd: string,
   branch: string,

@@ -12,7 +12,7 @@ steps:
       - { runner: claude-cli, model: <model A> }
       - { runner: copilot-cli, model: <model B> }
 review_mode: final # final | per_task
-max_review_cycles: 3
+max_review_cycles: 10
 max_lessons: 30
 max_context_tokens: # per conversation; initial values are estimates
   warn: 80000
