@@ -11,6 +11,8 @@ const stateSchema = z.object({
   task: z.string(),
   /** Kept so a resumed run names its branch like the first attempt did. Old files lack it. */
   slug: z.string().optional(),
+  /** Branch the Dev works on, kept so a resumed run reuses the same name. */
+  branch: z.string().optional(),
   size: z.enum(['complete', 'trivial']),
   /** Stages that ran to the end, in order. */
   completed: z.array(z.string()),
@@ -43,6 +45,15 @@ export async function writeState(
     `${JSON.stringify(full, null, 2)}\n`,
     (text) => stateSchema.parse(JSON.parse(text)),
   );
+}
+
+/** Records the branch in an existing state.json; does nothing when the run has none yet. */
+export async function saveBranch(
+  runDir: string,
+  branch: string,
+): Promise<void> {
+  const state = await readState(runDir);
+  if (state) await writeState(runDir, { ...state, branch });
 }
 
 export type IncompleteRun = { run: Run; state: RunState };

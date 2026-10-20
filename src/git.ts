@@ -63,6 +63,19 @@ export async function branchExists(
   }
 }
 
+/** Local branch names that start with `prefix`. */
+export async function listBranches(
+  cwd: string,
+  prefix = '',
+): Promise<string[]> {
+  const out = await git(cwd, [
+    'for-each-ref',
+    '--format=%(refname:short)',
+    `refs/heads/${prefix}`,
+  ]);
+  return out === '' ? [] : out.split('\n');
+}
+
 export async function checkout(
   cwd: string,
   branch: string,

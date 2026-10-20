@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { splitBatches, taskBlocks } from '../src/steps/dev.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { branchName } from '../src/branchName.js';
+import { checkout, currentBranch } from '../src/git.js';
+import { createRun, ensureLocalExclude } from '../src/runs.js';
+import { readState, writeState } from '../src/state.js';
+import { ensureBranch, splitBatches, taskBlocks } from '../src/steps/dev.js';
+import { makeRepo } from './helpers.js';
 import { parseTasks } from '../src/artifacts.js';
 
 const task = (n: number) => `## T${n}: Tarefa ${n}
@@ -26,5 +33,47 @@ describe('batches', () => {
     expect([...blocks.keys()]).toEqual([1, 2, 3]);
     expect(blocks.get(2)).toContain('## T2: Tarefa 2');
     expect(blocks.get(2)).not.toContain('T3');
+  });
+});
+
+describe('ensureBranch', () => {
+  async function setup() {
+    const cwd = await makeRepo();
+    await ensureLocalExclude(cwd);
+    const run = await createRun(cwd, 'adicionar login');
+    await writeState(run.dir, {
+      task: 'adicionar login',
+      slug: run.slug,
+      size: 'complete',
+      completed: [],
+      status: 'running',
+    });
+    return { cwd, run };
+  }
+
+  it('creates forge/<creative name>, not the slug, and stores it in state.json', async () => {
+    const { cwd, run } = await setup();
+    const branch = await ensureBranch(cwd, run);
+    expect(branch).toBe(branchName(run.id, []));
+    expect(branch).not.toContain(run.slug);
+    expect(await currentBranch(cwd)).toBe(branch);
+    expect((await readState(run.dir))?.branch).toBe(branch);
+    expect(await readFile(join(run.dir, 'state.json'), 'utf-8')).toContain(
+      branch,
+    );
+  });
+
+  it('a resumed run reuses the name stored in state.json', async () => {
+    const { cwd, run } = await setup();
+    const first = await ensureBranch(cwd, run);
+    await checkout(cwd, 'feature/x');
+    expect(await ensureBranch(cwd, run)).toBe(first);
+    expect(await currentBranch(cwd)).toBe(first);
+  });
+
+  it('keeps a forge/* branch that is already checked out', async () => {
+    const { cwd, run } = await setup();
+    await checkout(cwd, 'forge/outra', true);
+    expect(await ensureBranch(cwd, run)).toBe('forge/outra');
   });
 });

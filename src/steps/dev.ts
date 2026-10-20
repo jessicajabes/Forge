@@ -7,7 +7,10 @@ import {
   commitAll,
   currentBranch,
   git,
+  listBranches,
 } from '../git.js';
+import { branchName } from '../branchName.js';
+import { readState, saveBranch } from '../state.js';
 import type { RunContext } from '../orchestrator.js';
 import { workflowDir, type Run } from '../runs.js';
 import { loadSkill } from '../skills.js';
@@ -44,26 +47,32 @@ export function taskBlocks(markdown: string): Map<number, string> {
 }
 
 /**
- * Makes sure the Dev works on its own branch `forge/<slug>` (DESIGN 4.6). A branch that
- * already holds commits of this run is reused (a resumed run); a name taken by another
- * run gets the run id instead.
+ * Makes sure the Dev works on its own branch `forge/<creative-name>` (DESIGN 4.6). The
+ * name is stored in state.json, so a resumed run reuses it. A `forge/*` branch already
+ * checked out is kept. The run folder still uses the slug.
  */
 export async function ensureBranch(cwd: string, run: Run): Promise<string> {
-  const wanted = `forge/${run.slug}`;
   const current = await currentBranch(cwd);
   if (current?.startsWith('forge/')) return current;
-  if (!(await branchExists(cwd, wanted))) {
-    await checkout(cwd, wanted, true);
-    return wanted;
+  const stored = (await readState(run.dir))?.branch;
+  if (stored) {
+    await checkout(cwd, stored, !(await branchExists(cwd, stored)));
+    return stored;
   }
-  const log = await git(cwd, ['log', '--format=%B', wanted]).catch(() => '');
-  if (log.includes(`Forge-Run: ${run.id}`)) {
-    await checkout(cwd, wanted);
-    return wanted;
+  // runs started before the creative name: forge/<slug> holding this run's commits
+  const legacy = `forge/${run.slug}`;
+  if (await branchExists(cwd, legacy)) {
+    const log = await git(cwd, ['log', '--format=%B', legacy]).catch(() => '');
+    if (log.includes(`Forge-Run: ${run.id}`)) {
+      await checkout(cwd, legacy);
+      await saveBranch(run.dir, legacy);
+      return legacy;
+    }
   }
-  const alternative = `forge/${run.id}`;
-  await checkout(cwd, alternative, true);
-  return alternative;
+  const name = branchName(run.id, await listBranches(cwd, 'forge/'));
+  await checkout(cwd, name, true);
+  await saveBranch(run.dir, name);
+  return name;
 }
 
 /** Batch numbers already committed on this branch, read from the `Forge-Batch` trailers. */

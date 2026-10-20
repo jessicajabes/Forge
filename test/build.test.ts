@@ -77,7 +77,7 @@ describe('build stage', () => {
   it('works on a branch forge/<slug> and makes one commit for the whole run in final mode', async () => {
     const { ctx, edits } = await setup('review_mode: final');
     await stage()(ctx);
-    expect(await currentBranch(ctx.cwd)).toBe('forge/adicionar-coisas');
+    expect(await currentBranch(ctx.cwd)).toMatch(/^forge\/[a-z]+-[a-z]+$/);
     expect(edits).toEqual([true]);
     expect(await commitsAhead(ctx.cwd)).toBe('1');
     const message = await git(ctx.cwd, ['log', '-1', '--format=%B']);

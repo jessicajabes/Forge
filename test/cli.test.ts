@@ -157,8 +157,8 @@ describe('forge-jj', () => {
       'lens',
       'lens',
     ]);
-    expect(await git(cwd, ['branch', '--show-current'])).toBe(
-      'forge/corrigir-o-typo',
+    expect(await git(cwd, ['branch', '--show-current'])).toMatch(
+      /^forge\/[a-z]+-[a-z]+$/,
     );
     expect(await git(cwd, ['rev-list', '--count', 'feature/x..HEAD'])).toBe(
       '1',
