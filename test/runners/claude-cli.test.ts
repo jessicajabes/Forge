@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ClaudeCliError,
   buildInvocation,
@@ -32,6 +32,14 @@ describe('buildInvocation', () => {
     expect(args).not.toContain('Bash');
     expect(args.join(' ')).not.toMatch(/bypassPermissions|dangerously/);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
+  });
+
+  it('an editing call has no turn limit unless editMaxTurns is set, and a read-only call has 20', () => {
+    expect(buildInvocation(edit, opts, {}).args).not.toContain('--max-turns');
+    const readArgs = buildInvocation(read, opts, {}).args;
+    expect(readArgs[readArgs.indexOf('--max-turns') + 1]).toBe('20');
+    const limited = buildInvocation(edit, { ...opts, editMaxTurns: 90 }, {});
+    expect(limited.args[limited.args.indexOf('--max-turns') + 1]).toBe('90');
   });
 
   it('is isolated by default: project settings only, no MCP, no skills, no auto memory', () => {
@@ -112,6 +120,43 @@ describe('createClaudeCliRunner', () => {
     });
     expect(await runner(read)).toBe('oi');
     expect(seen).toEqual([{ cmd: 'claude', cwd: '/repo' }]);
+  });
+
+  it('an editing call has no timeout unless editTimeoutMs is set, and a read-only call stops at 30 minutes', async () => {
+    vi.useFakeTimers();
+    try {
+      const hang = () => {
+        const child = new EventEmitter() as ChildProcess;
+        Object.assign(child, {
+          stdout: new PassThrough(),
+          stderr: new PassThrough(),
+          stdin: new PassThrough(),
+          kill: () => true,
+        });
+        return child;
+      };
+      const runner = createClaudeCliRunner({ cwd: '/repo', spawnFn: hang });
+      let editSettled = false;
+      const settle = () => {
+        editSettled = true;
+      };
+      runner(edit).then(settle, settle);
+      const readResult = runner(read).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      expect(await readResult).toBeInstanceOf(ClaudeCliError);
+      expect(editSettled).toBe(false);
+
+      const limited = createClaudeCliRunner({
+        cwd: '/repo',
+        editTimeoutMs: 60_000,
+        spawnFn: hang,
+      });
+      const outcome = limited(edit).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(await outcome).toBeInstanceOf(ClaudeCliError);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects when the process fails', async () => {

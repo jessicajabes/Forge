@@ -61,7 +61,7 @@ Flags skip the questions:
 | `--review <final\|per_task>` | The reviewer checks everything at the end, or each task before the next |
 | `--no-arena` | Plain Dev, no arena |
 | `--arena <n>` | Number of arena candidates |
-| `--refresh-context` | Rebuild the context summary even on a trivial run |
+| `--refresh-context` | Rebuild the shared context summary even if the repo did not change |
 
 `forge-jj` with no argument resumes the last interrupted run.
 
@@ -88,11 +88,11 @@ Ctrl+C keeps a draft, and the next run offers to continue it.
 - Its files live in `.workflow/` and `.workflow.yml`. The first run adds both to `.git/info/exclude`; your `.gitignore` is never touched.
 - Only one run at a time per repository.
 
-Each run has its own folder, `.workflow/runs/<date>-<slug>/`, with `spec.md`, `tasks.md`, `context.md` and `review.md`. `.workflow/lessons.md` is shared by all runs.
+Each run has its own folder, `.workflow/runs/<date>-<slug>/`, with `spec.md`, `tasks.md`, a copy of `context.md` and `review.md`. `.workflow/lessons.md` and `.workflow/context.md` are shared by all runs: the context is rebuilt only when the repo changed since it was made.
 
 ## Configuration
 
-Copy [`.workflow.example.yml`](.workflow.example.yml) to `.workflow.yml` in the target repository. Every field is optional. You can pick a runner and a model per stage, several reviewers of different models, the number of arena candidates, one model per candidate, and the arena judge.
+Copy [`.workflow.example.yml`](.workflow.example.yml) to `.workflow.yml` in the target repository. Every field is optional. You can pick a runner and a model per stage, several reviewers of different models, the number of arena candidates, one model per candidate, and the arena judge. `dev.batching: per_task` makes one Dev call per task (each committed as it ends) while the review stays at the end. Editing calls have no turn or time limit unless you set `dev.max_turns` or `dev.timeout_minutes`.
 
 Without a config, everything runs on `claude-cli` with Claude Code's default model, with 3 arena candidates, review at the end, and at most 3 review cycles.
 

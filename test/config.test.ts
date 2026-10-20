@@ -2,7 +2,13 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadConfig, parseConfig } from '../src/config.js';
+import {
+  ConfigError,
+  devBatching,
+  loadConfig,
+  parseConfig,
+} from '../src/config.js';
+import { estimateDevCost } from '../src/costEstimate.js';
 
 describe('config', () => {
   it('uses the defaults when the file is missing', async () => {
@@ -56,5 +62,43 @@ describe('config', () => {
     const config = parseConfig(example);
     expect(config.steps.review.reviewers).toHaveLength(2);
     expect(config.steps.review.reviewers[1]?.runner).toBe('copilot-cli');
+  });
+});
+
+describe('dev.batching and the dev limits', () => {
+  it('the Dev has no turn or time limit unless they are set', () => {
+    const config = parseConfig('');
+    expect(config.dev.max_turns).toBeUndefined();
+    expect(config.dev.timeout_minutes).toBeUndefined();
+    expect(
+      parseConfig('dev: { max_turns: 90, timeout_minutes: 120 }').dev,
+    ).toMatchObject({ max_turns: 90, timeout_minutes: 120 });
+  });
+
+  it('follows review_mode when dev.batching is not set', () => {
+    expect(devBatching(parseConfig(''))).toBe('all');
+    expect(devBatching(parseConfig('review_mode: per_task'))).toBe('per_task');
+  });
+
+  it('dev.batching: per_task splits the Dev while the review stays final', () => {
+    const config = parseConfig('dev: { batching: per_task }');
+    expect(config.review_mode).toBe('final');
+    expect(devBatching(config)).toBe('per_task');
+  });
+
+  it('refuses a per-task review with a single Dev call', () => {
+    expect(() =>
+      parseConfig('review_mode: per_task\ndev: { batching: all }'),
+    ).toThrow(ConfigError);
+  });
+
+  it('the cost estimate counts one batch per task when the Dev is split', () => {
+    const config = parseConfig('dev: { batching: per_task }');
+    const estimate = estimateDevCost({
+      config,
+      taskCount: 4,
+      size: 'complete',
+    });
+    expect(estimate.batches).toBe(4);
   });
 });

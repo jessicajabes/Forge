@@ -16,8 +16,14 @@ export type ClaudeCliOptions = {
   isolated?: boolean;
   /** `dev.allowed_commands`: the only shell commands an editing run may use. */
   allowedCommands?: string[];
+  /** Turn limit of a read-only call. Default 20. */
   maxTurns?: number;
+  /** Time limit of a read-only call. Default 30 minutes. */
   timeoutMs?: number;
+  /** Turn limit of an editing call (`dev.max_turns`). Not set: no limit. */
+  editMaxTurns?: number;
+  /** Time limit of an editing call (`dev.timeout_minutes`). Not set: no limit. */
+  editTimeoutMs?: number;
   /** Called once if ANTHROPIC_API_KEY would replace the login (DESIGN 4.5). */
   notice?: (message: string) => void;
   /** Starts the process. Tests replace it; the default runs the real `claude`. */
@@ -51,7 +57,8 @@ export function buildInvocation(
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Invocation {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
-  args.push('--max-turns', String(opts.maxTurns ?? (req.canEdit ? 60 : 20)));
+  const turns = req.canEdit ? opts.editMaxTurns : (opts.maxTurns ?? 20);
+  if (turns !== undefined) args.push('--max-turns', String(turns));
   if (opts.model) args.push('--model', opts.model);
 
   args.push('--tools', (req.canEdit ? EDIT_TOOLS : READ_ONLY_TOOLS).join(','));
@@ -131,17 +138,16 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       const child = start('claude', args, { cwd: opts.cwd, env });
       let stdout = '';
       let stderr = '';
-      const timer = setTimeout(
-        () => {
-          child.kill('SIGTERM');
-          reject(
-            new ClaudeCliError(
-              `o claude passou de ${opts.timeoutMs ?? 30 * 60_000} ms`,
-            ),
-          );
-        },
-        opts.timeoutMs ?? 30 * 60_000,
-      );
+      const limit = req.canEdit
+        ? opts.editTimeoutMs
+        : (opts.timeoutMs ?? 30 * 60_000);
+      const timer =
+        limit === undefined
+          ? undefined
+          : setTimeout(() => {
+              child.kill('SIGTERM');
+              reject(new ClaudeCliError(`o claude passou de ${limit} ms`));
+            }, limit);
 
       child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));

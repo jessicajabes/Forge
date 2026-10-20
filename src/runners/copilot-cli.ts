@@ -16,7 +16,10 @@ export type CopilotCliOptions = {
   model?: string;
   /** `dev.allowed_commands`: the only shell commands an editing run may use. */
   allowedCommands?: string[];
+  /** Time limit of a read-only call. Default 30 minutes. */
   timeoutMs?: number;
+  /** Time limit of an editing call (`dev.timeout_minutes`). Not set: no limit. */
+  editTimeoutMs?: number;
   /** Where `copilot` writes its usage statistics as JSON (`--usage-output-file`). */
   usageFile?: string;
   spawnFn?: (
@@ -123,11 +126,16 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
       });
       let stdout = '';
       let stderr = '';
-      const timeout = opts.timeoutMs ?? 30 * 60_000;
-      const timer = setTimeout(() => {
-        child.kill('SIGTERM');
-        reject(new CopilotCliError(`o copilot passou de ${timeout} ms`));
-      }, timeout);
+      const timeout = req.canEdit
+        ? opts.editTimeoutMs
+        : (opts.timeoutMs ?? 30 * 60_000);
+      const timer =
+        timeout === undefined
+          ? undefined
+          : setTimeout(() => {
+              child.kill('SIGTERM');
+              reject(new CopilotCliError(`o copilot passou de ${timeout} ms`));
+            }, timeout);
       child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
       child.on('error', (error) => {

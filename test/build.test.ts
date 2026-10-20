@@ -160,3 +160,119 @@ describe('build stage', () => {
     expect(await commitsAhead(ctx.cwd)).toBe('3');
   });
 });
+
+describe('build stage with dev.batching per_task and the review at the end', () => {
+  const yml = 'dev: { batching: per_task }';
+  const finding = (title: string, taskId: string) => ({
+    task: taskId,
+    title,
+    description: `${title} está errado`,
+    raised_by: ['A'],
+    rationale: 'importa',
+  });
+
+  function reviewRunners(leads: string[]) {
+    const reviewerPrompts: string[] = [];
+    let next = 0;
+    const makeRunner: RunnerFactory = () => async (req) => {
+      if (req.prompt.includes('adversarial code reviewer')) {
+        reviewerPrompts.push(req.prompt);
+        return '## Findings\n\nno findings';
+      }
+      return leads[next++] ?? APPROVED;
+    };
+    return { makeRunner, reviewerPrompts };
+  }
+
+  it('makes one Dev call and one commit per task, then one review of everything', async () => {
+    const { ctx, prompts } = await setup(yml);
+    const { makeRunner, reviewerPrompts } = reviewRunners([]);
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain('## T2: Tarefa 2');
+    expect(prompts[1]).not.toContain('## T1: Tarefa 1');
+    expect(await commitsAhead(ctx.cwd)).toBe('3');
+    // one review, over the diff against the commit before the first task
+    expect(reviewerPrompts).toHaveLength(1);
+    for (const n of [1, 2, 3])
+      expect(reviewerPrompts[0]).toContain(`feature-${n}.txt`);
+    const review = await readFile(join(ctx.run.dir, 'review.md'), 'utf-8');
+    expect(review).toContain('- **Veredito**: aprovado');
+    expect(review).not.toContain('## Lote');
+  });
+
+  it('sends the review items back one Dev call per cited task and commits the corrections once', async () => {
+    const { ctx, prompts } = await setup(yml);
+    const rejected = JSON.stringify({
+      verdict: 'rejected',
+      act_on: [finding('Alfa', 'T2'), finding('Beta', 'T3')],
+      consider: [],
+      noted: [],
+      dismissed: [],
+    });
+    const { makeRunner } = reviewRunners([rejected, APPROVED]);
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+
+    expect(prompts).toHaveLength(5);
+    expect(prompts[3]).toContain('## T2: Tarefa 2');
+    expect(prompts[3]).toContain('[T2] Alfa');
+    expect(prompts[3]).not.toContain('## T3: Tarefa 3');
+    expect(prompts[4]).toContain('## T3: Tarefa 3');
+    expect(prompts[4]).not.toContain('## T2: Tarefa 2');
+    expect(await commitsAhead(ctx.cwd)).toBe('4');
+    const message = await git(ctx.cwd, ['log', '-1', '--format=%B']);
+    expect(message).toContain('Forge-Batch: review');
+  });
+
+  it('a failed task stops the run, and running again goes on from it without redoing the review', async () => {
+    const { ctx, prompts } = await setup(yml);
+    const { makeRunner, reviewerPrompts } = reviewRunners([]);
+    let calls = 0;
+    const real = ctx.runner;
+    ctx.runner = async (req) => {
+      if (++calls === 2) throw new Error('queda');
+      return real(req);
+    };
+    await expect(
+      createBuildStage({ io: createFakeIO([]), makeRunner })(ctx),
+    ).rejects.toThrow('queda');
+    expect(await commitsAhead(ctx.cwd)).toBe('1');
+    expect(reviewerPrompts).toHaveLength(0);
+
+    ctx.runner = real;
+    prompts.length = 0;
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain('Batch 2 of 3');
+    expect(reviewerPrompts).toHaveLength(1);
+    expect(await commitsAhead(ctx.cwd)).toBe('3');
+
+    prompts.length = 0;
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+    expect(prompts).toHaveLength(0);
+    expect(reviewerPrompts).toHaveLength(1);
+  });
+
+  it('does not redo a task that changed nothing when the run is resumed', async () => {
+    const { ctx, prompts } = await setup(yml);
+    const { makeRunner } = reviewRunners([]);
+    let calls = 0;
+    const real = ctx.runner;
+    ctx.runner = async (req) => {
+      calls++;
+      if (calls === 1) return 'já estava pronto';
+      if (calls === 3) throw new Error('queda');
+      return real(req);
+    };
+    await expect(
+      createBuildStage({ io: createFakeIO([]), makeRunner })(ctx),
+    ).rejects.toThrow('queda');
+
+    ctx.runner = real;
+    prompts.length = 0;
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Batch 3 of 3');
+  });
+});

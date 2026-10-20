@@ -111,10 +111,22 @@ export async function removeWorktree(cwd: string, dir: string): Promise<void> {
   await git(cwd, ['worktree', 'prune']).catch(() => undefined);
 }
 
-/** Everything the worktree changed against HEAD, new files included, as a binary-safe patch. */
-export async function workingDiff(cwd: string): Promise<string> {
+/**
+ * Everything the worktree changed against `base` (HEAD by default), new files included,
+ * as a binary-safe patch.
+ */
+export async function workingDiff(cwd: string, base = 'HEAD'): Promise<string> {
   await git(cwd, ['add', '-A']);
-  return git(cwd, ['diff', '--cached', '--binary', 'HEAD']);
+  return git(cwd, ['diff', '--cached', '--binary', base]);
+}
+
+/** The per-file summary of `workingDiff`, for a diff too big to read whole. */
+export async function workingDiffStat(
+  cwd: string,
+  base = 'HEAD',
+): Promise<string> {
+  await git(cwd, ['add', '-A']);
+  return git(cwd, ['diff', '--cached', '--stat=200', base]);
 }
 
 export async function applyPatchFile(

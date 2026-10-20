@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -325,5 +326,56 @@ describe('reviewBatch', () => {
     await expect(
       reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
     ).rejects.toBeInstanceOf(SubagentEscalation);
+  });
+});
+
+describe('review diff', () => {
+  it('gives the reviewers only a per-file summary when the diff is over the limit', async () => {
+    const t = await setup([APPROVED]);
+    await writeFile(join(t.ctx.cwd, 'big.txt'), 'x'.repeat(70_000));
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix);
+    const prompt = t.reviewerPrompts[0] ?? '';
+    expect(prompt).toContain('over the 60000 limit');
+    expect(prompt).toContain('big.txt');
+    expect(prompt).not.toContain('x'.repeat(1000));
+  });
+
+  it('reads the diff against a base commit, so work already committed is still reviewed', async () => {
+    const t = await setup([APPROVED, APPROVED]);
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: t.ctx.cwd }).toString().trim();
+    const base = git('rev-parse', 'HEAD');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'trabalho já commitado');
+
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix);
+    expect(t.reviewerPrompts[0]).not.toContain('change.txt');
+
+    await reviewBatch(t.ctx, t.batch, t.deps, t.devFix, { base });
+    expect(t.reviewerPrompts[1]).toContain('change.txt');
+  });
+
+  it('with groupByTask, sends one Dev call per cited task', async () => {
+    const t = await setup([
+      lead({
+        act_on: [
+          item('A', { task: 'T1' }),
+          item('B', { task: 'T2' }),
+          item('C', { task: 'T1' }),
+          item('D', { task: null }),
+        ],
+      }),
+      APPROVED,
+    ]);
+    const seen: number[][] = [];
+    const devFix = async (feedback: string, taskIds: number[]) => {
+      seen.push(taskIds);
+      return t.devFix(feedback);
+    };
+    await reviewBatch(t.ctx, t.batch, t.deps, devFix, { groupByTask: true });
+    expect(seen).toEqual([[1], [2], []]);
+    expect(t.feedbacks[0]).toContain('1. [T1] A');
+    expect(t.feedbacks[0]).toContain('2. [T1] C');
+    expect(t.feedbacks[1]).toContain('1. [T2] B');
   });
 });
