@@ -210,12 +210,12 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `skills/lessons/SKILL.md`, `skills/lessons/references/judgment-reviewer.md` (novo), `skills/lessons/references/tooling-reviewer.md` (novo), `skills/lessons/references/divergent-reviewer.md` (novo), `skills/lessons/references/synthesizer.md` (novo)
 - **O que fazer**: Adaptar a `reflect` da pstack e trocar para `adapted: true`. Manter as três lentes (Judgment, Tooling, Divergent) e o sintetizador com Accepted, Rejected e Backlog (4.13). Trocar a entrada: no lugar da transcrição da conversa, cada lente lê só arquivos da pasta da execução (`review.md`, `arena.md`, `tasks.md`, `spec.md`) e o diff dos commits do lote, nunca a conversa do Grill nem a transcrição da sessão do CLI. Trocar a saída: no lugar de edições de skills, propor lições de uma frase para o `lessons.md` (5.4, 6.2). Remover Cursor, MCPs, o arquivo de modelos da pstack e o tracker de devex. Escrever os quatro templates em `references/`, com a origem declarada.
 - **Critério de aceite**:
-  - [ ] `skills/lessons/SKILL.md` tem `adapted: true`, `source`, `source_skill` e `license: MIT`
-  - [ ] O corpo não cita transcrição, Cursor, MCP, `poteto-mode` nem tracker de devex
-  - [ ] Cada template de `references/` lista os arquivos que a lente pode ler, e nenhum é a conversa do Grill ou a transcrição da sessão
-  - [ ] Os quatro arquivos de `references/` existem e cada lente tem o próprio template
-  - [ ] A saída da skill é uma lista de linhas no formato do `lessons.md` (regra, data, tarefa de origem)
-  - [ ] A seção 4.13 do `DESIGN.md` lista as três lentes
+  - [x] `skills/lessons/SKILL.md` tem `adapted: true`, `source`, `source_skill` e `license: MIT`
+  - [x] O corpo não cita transcrição, Cursor, MCP, `poteto-mode` nem tracker de devex
+  - [x] Cada template de `references/` lista os arquivos que a lente pode ler, e nenhum é a conversa do Grill ou a transcrição da sessão
+  - [x] Os quatro arquivos de `references/` existem e cada lente tem o próprio template
+  - [x] A saída da skill é uma lista de linhas no formato do `lessons.md` (regra, data, tarefa de origem)
+  - [x] A seção 4.13 do `DESIGN.md` lista as três lentes
 - **Depende de**: T6
 
 ## T23: Etapa Lições

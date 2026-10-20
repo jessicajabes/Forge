@@ -43,4 +43,19 @@ describe('shipped skills', () => {
       'rubric-prompt.md',
     ]);
   });
+
+  it('lessons is adapted and has one template per lens plus the synthesizer', async () => {
+    const skill = await loadSkill('lessons');
+    expect(skill.meta['adapted']).toBe(true);
+    expect(skill.body).not.toMatch(
+      /transcript path|subagent_type|Cursor|devex/i,
+    );
+    const files = await readdir(join('skills', 'lessons', 'references'));
+    expect(files.sort()).toEqual([
+      'divergent-reviewer.md',
+      'judgment-reviewer.md',
+      'synthesizer.md',
+      'tooling-reviewer.md',
+    ]);
+  });
 });

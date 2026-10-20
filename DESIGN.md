@@ -236,7 +236,7 @@ Por que existem: isolar contexto. Cada subagente começa limpo e recebe só os a
 |---|---|---|
 | Grill | busca de fatos do repo, quando uma pergunta depende de algo que está no código | o Forge dispara a busca enquanto o usuário responde a pergunta atual; se a próxima pergunta depende do fato, espera o resultado. O usuário nunca é perguntado sobre o que dá para ler no repo |
 | Revisão | um revisor por modelo listado em `steps.review.reviewers`, em paralelo; a divergência vem da diversidade de modelos, não de papéis atribuídos. Depois, uma síntese que classifica cada achado (skill `review`, adaptada de `interrogate`) | o líder devolve um JSON validado com zod (veredito, quatro grupos, `previous_items` e mapa de concordância entre os modelos); o Forge regenera se vier malformado (4.1) e escreve o `review.md` em português. A intenção vem do `spec.md`; sem spec (tarefa trivial), vem do `tasks.md` e do diff |
-| Lições | um por lente, em paralelo (a definir na adaptação da skill `lessons`), mais um **sintetizador** depois deles | lista de lições propostas, que o usuário aprova uma por uma (6.2) |
+| Lições | três lentes em paralelo (**judgment**, **tooling** e **divergent**, adaptadas da `reflect` da pstack), mais um **sintetizador** depois delas | lista de lições propostas, que o usuário aprova uma por uma (6.2) |
 | Dev (arena) | um **juiz** somente leitura, depois dos candidatos (4.14) | veredito com pontuação por critério e a base recomendada |
 | Reconhecimento | em repo maior, três **exploradores** em paralelo (estrutura e stack; convenções e ferramentas; fluxo e fronteiras), depois um **explicador** (4.9) | o explicador escreve o `context.md` da pasta da execução; em repo pequeno só ele roda, explorando sozinho |
 | Tarefas | nenhum | — |

@@ -1,82 +1,70 @@
 ---
 name: lessons
-description: Propõe lições novas a partir do review.md; o usuário aprova uma por uma.
+description: Propõe lições novas para o lessons.md a partir dos artefatos da execução (review.md, arena.md, tasks.md, spec.md e o diff dos commits). O usuário aprova uma por uma.
 source: https://github.com/backnotprop/pstack
 source_skill: reflect
 license: MIT
-adapted: false
+adapted: true
 ---
 
-# Reflect
+# Lessons
 
-Mine the current conversation for durable learnings, then route them into skill edits.
+Mine the artifacts of one finished run for durable learnings, and propose them as one-line rules for `lessons.md`. A lesson is a rule that would have prevented a problem this run hit, and that will help the next run on this project. One-offs are not lessons.
 
-Invoke when the user says "reflect" or "/reflect". Skip when the conversation is trivial, off-topic, or already covered by an existing skill the parent followed correctly. One-offs are not learnings.
+The Forge runs this stage with three lenses in parallel and one synthesizer after them. Each lens reads a different slice of the run, finds candidate rules, and returns them with evidence. The synthesizer merges the candidates and returns the final list. Nothing is written until the person approves each rule, one by one. Do not write to any file yourself.
 
-## 1. Locate the active transcript
+## What you may read
 
-Before fanning out, find this conversation's transcript in the active workspace's session directory. Do not glob across every project's directory. That crosses workspace boundaries and reads private chats from unrelated projects.
+Only these, all from this run:
 
-Where the transcript lives depends on your harness:
+- `review.md`: the reviewer's findings, the Dev's answers, what was kept, closed, noted or dismissed, and how the review ended;
+- `arena.md` (one per batch, when the arena ran): who dropped out, the judge's verdict, what was grafted or rejected, and the result of the checks;
+- `tasks.md` and `spec.md`: what was asked, and which decisions were provisional;
+- the diff of the commits of the run, when a finding points at code;
+- `lessons.md`, the rules that already exist.
 
-- **Cursor:** the `agent-transcripts/` directory the system prompt names.
+Never read or ask for the conversation of the Grill, a CLI session transcript, `.env` files, keys, or other secrets. If a file you need is missing, say so and go on with what you have.
 
-  ```bash
-  ls -t <agent-transcripts>/*.jsonl <agent-transcripts>/*/*.jsonl <agent-transcripts>/*/subagents/*.jsonl 2>/dev/null | head -10
-  ```
+## What makes a good lesson
 
-  That covers the legacy flat (`<id>.jsonl`), current nested (`<id>/<id>.jsonl`), and subagent (`<parent>/subagents/<child>.jsonl`) layouts. For each candidate, read the first JSONL line. Take the file whose `message.content[0].text` contains the conversation's opening user prompt.
-- **Claude Code:** `~/.claude/projects/<slug>/<session-id>.jsonl`, where `<slug>` is the workspace path with every character that isn't a letter or digit turned into "-".
-- **Pi:** `~/.pi/agent/sessions/--<slug>--/*.jsonl`, where `<slug>` is the workspace path with the leading slash dropped and each "/" turned into "-".
-- **Codex:** `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Keep only files whose first line has `payload.cwd` equal to the workspace path.
-- **Other harnesses:** check the harness's session directory for this workspace.
+- **A rule, in one sentence.** "Every new route needs a test for the error path." Not a story, not a diagnosis.
+- **Durable.** It holds beyond this task. A fact about one file, one bug or one deadline is not a lesson.
+- **Grounded.** It cites where the run showed it: a section of `review.md`, a finding, a failed check. A rule with no evidence is a guess.
+- **Checkable.** Another agent can tell from a diff whether the rule was followed.
+- **New.** It does not repeat or contradict `lessons.md`. If it refines an old rule, say which one.
+- **Not better enforced by a tool.** If a lint rule, a type, or a test would catch it every time, say that, instead of adding a rule people must remember.
 
-Outside Cursor, take the newest candidates first and confirm one by finding the conversation's opening user prompt in its first user message. If none matches, pass a tight digest of the session instead.
+## Candidate format
 
-## 2. Spawn three reviewers in parallel
+Each lens returns a list. One candidate per item, in exactly this form:
 
-One message, three `Task` calls, `subagent_type: generalPurpose`, agent mode (`readonly: false`). Reviewers need MCP access to look up the tickets, chat threads, and observability traces the transcript references, and readonly strips MCPs.
+```
+- RULE: <one sentence, an instruction>
+  EVIDENCE: <file and section, or finding title, that shows it>
+  TASK: <T1 | none>
+  WHY IT LASTS: <one line on why it is not a one-off>
+```
 
-**Other harnesses.** The spawns in this skill use Cursor's `Task` tool. In another harness, use its subagent tool: `Agent` in Claude Code (`subagent_type: general-purpose`), `task` in OpenCode (`subagent_type: general`), `spawn_agent` in Codex. Keep the prompt and the model. Drop parameters your tool doesn't have. If your harness has no subagent tool, as in Pi without an extension, run each role yourself, one after another.
+If the lens finds nothing worth a rule, return `No candidates.` and stop. An empty result is a valid outcome.
 
-Each reviewer and the synthesizer name a role line in the pstack settings file (`~/.cursor/rules/pstack-models.mdc` in Cursor, `~/.agents/pstack-models.md` in other harnesses) and a default. Set `model` to that line's value, or to the default if the file or the line is missing. Leave `model` unset when the value is `auto` or `inherit-parent`. If your subagent tool rejects a slug, use the default and say so. If it rejects the default, use the closest valid slug of the same family from its error message or your harness's model list. Pick each subagent's reasoning level and fast or standard speed for the job, per the Subagents section of the **poteto-mode** skill.
+## Synthesizer output
 
-| Lens | Role line | Default `model` | Prompt template |
-|---|---|---|---|
-| Judgment | `reflect judgment, divergent, synthesizer` | `claude-opus-5-5-xhigh` | `references/judgment-reviewer.md` |
-| Tooling | `reflect tooling` | `grok-4.7-xhigh-fast` | `references/tooling-reviewer.md` |
-| Divergent | `reflect judgment, divergent, synthesizer` | `claude-opus-5-5-xhigh` | `references/divergent-reviewer.md` |
+The synthesizer returns one JSON object and nothing else, with the text fields in the language of the project:
 
-Pass each template verbatim, substituting the transcript path or digest where marked. Reviewers return findings in the `Task` response body.
+```json
+{
+  "accepted": [
+    { "rule": "<one sentence>", "task": "T1 | null", "evidence": "<where the run showed it>", "lenses": ["judgment", "tooling"] }
+  ],
+  "rejected": [
+    { "rule": "<the candidate>", "reason": "<one line: one-off, duplicate of lessons.md, no evidence, or better enforced by a tool>" }
+  ]
+}
+```
 
-## 3. Synthesize
+Rules for the synthesizer:
 
-One `Task` call, `subagent_type: generalPurpose`, `model` from the `reflect judgment, divergent, synthesizer` line (default `claude-opus-5-5-xhigh`), agent mode (`readonly: false`). It spot-verifies citations through MCP, and readonly strips MCPs. Pass `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. It returns an Accepted / Rejected / Backlog list.
-
-## 4. Structural enforcement check
-
-Move any Accepted item that a lint rule, script, metadata flag, or runtime check would enforce more reliably to Backlog. See the **encode-lessons-in-structure** principle skill.
-
-## 5. Apply
-
-Present the synthesizer's full Accepted / Rejected / Backlog output and wait for explicit approval before applying any Accepted edit. The user picks the subset and may redirect routings. Skill changes affect every future agent in the org. Do not auto-apply.
-
-File each Backlog item to your team's devex or backlog tracker without waiting. Only the Accepted list waits for approval.
-
-Follow each approved row's Routing exactly:
-
-- Trivial existing-skill edit (a one-line bullet, a tightened sentence, a stale fact corrected): the parent does it directly.
-- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): hand to your harness's skill-authoring skill and run its draft / test / iterate loop. That is `create-skill` in Cursor (built in) or Anthropic's `skill-creator`. If you have neither, follow the Agent Skills format at agentskills.io. "`create-skill`" below means whichever of these you use.
-- `tune description: <skill path>` (the skill exists but didn't trigger when it should have): hand to `create-skill` and run its description-optimization loop.
-- `new skill via create-skill: <kebab-name>`: hand creation to `create-skill`. Do not invent the shape ad hoc.
-
-If your environment ships a SKILL.md validator, run it on every touched skill before declaring done.
-
-## 6. Summarize for the user
-
-Short list, no preamble:
-
-- Edits applied: `<skill path>`. What changed, one line each.
-- New skills created: `<skill path>`. One line each (rare).
-- Backlog filed to the devex tracker: `<issue title>` (`<tags>`). One line each.
-- Dropped: one line per rejected finding + reason from the synthesizer.
+- Merge candidates that say the same thing. A rule raised by two or more lenses is stronger.
+- Reject one-offs, duplicates of `lessons.md`, rules with no evidence, and rules a tool would enforce better.
+- Keep the accepted list short. A handful of strong rules beat a long list. The project keeps a limited number of lessons.
+- Do not invent a rule that no lens proposed.
