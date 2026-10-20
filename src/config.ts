@@ -84,18 +84,20 @@ const configSchema = z
         timeout_minutes: z.number().positive().optional(),
         arena: z
           .object({
+            // Opt-in: the arena only runs when this is set to true
+            enabled: z.boolean().default(false),
             candidates: z.number().int().positive().default(3),
             models: z.array(z.string()).optional(),
             judge: reviewerConfig.optional(),
           })
           .strict()
-          .default({ candidates: 3 }),
+          .default({ enabled: false, candidates: 3 }),
       })
       .strict()
       .default({
         allowed_commands: ['npm test', 'npm run lint', 'npx prettier'],
         check_commands: ['npm test', 'npm run lint'],
-        arena: { candidates: 3 },
+        arena: { enabled: false, candidates: 3 },
       }),
     claude: z
       .object({ isolated: z.boolean().default(true) })

@@ -25,6 +25,16 @@ describe('config', () => {
     expect(config.claude.isolated).toBe(true);
   });
 
+  it('keeps the arena off unless dev.arena.enabled is set', () => {
+    expect(parseConfig('').dev.arena.enabled).toBe(false);
+    expect(
+      parseConfig('dev: { arena: { candidates: 2 } }').dev.arena.enabled,
+    ).toBe(false);
+    expect(
+      parseConfig('dev: { arena: { enabled: true } }').dev.arena.enabled,
+    ).toBe(true);
+  });
+
   it('defaults max_review_cycles to 10 and honors an explicit value', () => {
     expect(parseConfig('').max_review_cycles).toBe(10);
     expect(parseConfig('max_review_cycles: 2').max_review_cycles).toBe(2);
