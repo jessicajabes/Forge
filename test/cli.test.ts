@@ -95,6 +95,7 @@ async function deps(
     isTTY: true,
     io,
     makeRunner: s.makeRunner,
+    stderr: { write: () => true },
     ...over,
   };
   return { d, cwd, io, s };
@@ -122,6 +123,11 @@ describe('parseFlags', () => {
       noArena: false,
     });
     expect(parseFlags(['x', '--no-arena']).noArena).toBe(true);
+  });
+
+  it('reads --quiet, off by default', () => {
+    expect(parseFlags(['x', '--quiet']).quiet).toBe(true);
+    expect(parseFlags(['x']).quiet).toBe(false);
   });
 
   it('rejects bad values with a clear message', () => {
@@ -176,6 +182,41 @@ describe('forge-jj', () => {
     expect(log.split('\n').filter((l) => l.length > 0)).toHaveLength(
       s.calls.length,
     );
+  });
+
+  it('writes progress.jsonl and the stage lines on stderr; --quiet keeps the file and silences stderr', async () => {
+    const run = async (extra: string[]) => {
+      const lines: string[] = [];
+      const { d, cwd, io } = await deps(['aprovar'], scripted(), {
+        stderr: { write: (text) => lines.push(text) },
+      });
+      await main(['x', '--size', 'trivial', '--review', 'final', ...extra], d);
+      const { readdir } = await import('node:fs/promises');
+      const [runId] = await readdir(join(cwd, '.workflow', 'runs'));
+      const file = await readFile(
+        join(cwd, '.workflow', 'runs', runId ?? '', 'progress.jsonl'),
+        'utf-8',
+      );
+      const events = file
+        .split('\n')
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as { type: string; at: string });
+      return { lines, events, out: io.output() };
+    };
+
+    const loud = await run([]);
+    expect(loud.lines.join('')).toContain('etapa recon');
+    // progress goes to stderr only; stdout keeps the questions and the results
+    expect(loud.out).not.toContain('etapa recon');
+    expect(loud.events.some((e) => e.type === 'stage')).toBe(true);
+
+    const quiet = await run(['--quiet']);
+    expect(quiet.lines).toEqual([]);
+    expect(quiet.events.some((e) => e.type === 'stage')).toBe(true);
+    expect(quiet.events.some((e) => e.type === 'call-start')).toBe(true);
+    for (const e of quiet.events) {
+      expect(Number.isNaN(Date.parse(e.at))).toBe(false);
+    }
   });
 
   it('flags skip the questions; without flags Enter takes the defaults', async () => {

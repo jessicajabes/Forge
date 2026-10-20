@@ -45,6 +45,9 @@ export class SubagentEscalation extends Error {
 
 let nextCallId = 0;
 
+/** A labelled runner remembers the one it wraps, so labelling it again does not nest. */
+const wrapped = new WeakMap<Runner, Runner>();
+
 /** `dev · candidato 2 · claude-cli/sonnet`: the parts that are known, joined. */
 export function originLabel(parts: string[], via?: RunnerVia): string {
   const who = via ? `${via.runner}/${via.model ?? 'padrão do CLI'}` : undefined;
@@ -62,7 +65,8 @@ export function labelRunner(
   via?: RunnerVia,
 ): Runner {
   if (!reporter) return runner;
-  return (req) =>
+  const base = wrapped.get(runner) ?? runner;
+  const labelled: Runner = (req) =>
     reporter.trackCall(
       {
         id: `call-${++nextCallId}`,
@@ -72,7 +76,7 @@ export function labelRunner(
         canEdit: req.canEdit,
       },
       (onEvent) =>
-        runner({
+        base({
           ...req,
           onEvent: (event) => {
             onEvent(event);
@@ -80,6 +84,8 @@ export function labelRunner(
           },
         }),
     );
+  wrapped.set(labelled, base);
+  return labelled;
 }
 
 async function runOne(

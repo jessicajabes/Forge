@@ -2,7 +2,13 @@ import { parseArgs } from 'node:util';
 import { ArenaEscalation } from './arena.js';
 import { logCalls } from './calls.js';
 import { join } from 'node:path';
-import { SubagentEscalation } from './subagents.js';
+import { createProgressWriter } from './progress.js';
+import {
+  createProgressReporter,
+  type ProgressReporter,
+  type ProgressReporterOptions,
+} from './progressReporter.js';
+import { SubagentEscalation, labelRunner, originLabel } from './subagents.js';
 import { loadConfig, type Config } from './config.js';
 import type { IO } from './io.js';
 import {
@@ -34,6 +40,7 @@ Opções:
   --no-arena                  Dev simples, sem arena
   --arena <n>                 número de candidatos do arena
   --refresh-context           refaz o context.md mesmo na execução trivial
+  --quiet                     sem progresso no terminal (o progress.jsonl continua sendo gravado)
   -h, --help                  mostra esta ajuda
 `;
 
@@ -44,6 +51,9 @@ export type CliDeps = {
   /** Builds the factory of runners for a config (isolation, notices). Tests pass fakes. */
   makeRunner: (config: Config) => RunnerFactory;
   openEditor?: OpenEditor;
+  /** Where the progress lines go. Default: the process stderr. Tests pass a fake. */
+  stderr?: ProgressReporterOptions['stream'];
+  env?: NodeJS.ProcessEnv;
 };
 
 type Flags = {
@@ -52,6 +62,7 @@ type Flags = {
   arena?: number;
   noArena: boolean;
   refreshContext: boolean;
+  quiet: boolean;
   help: boolean;
   task: string;
 };
@@ -70,6 +81,7 @@ export function parseFlags(argv: string[]): Flags {
         'no-arena': { type: 'boolean', default: false },
         arena: { type: 'string' },
         'refresh-context': { type: 'boolean', default: false },
+        quiet: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -80,6 +92,7 @@ export function parseFlags(argv: string[]): Flags {
   const flags: Flags = {
     noArena: v['no-arena'] === true,
     refreshContext: v['refresh-context'] === true,
+    quiet: v.quiet === true,
     help: v.help === true,
     task: parsed.positionals.join(' ').trim(),
   };
@@ -141,6 +154,7 @@ async function askChoices(
 
 /** Each stage gets the runner of its own `steps.<stage>` entry, without copying the context. */
 function withRunner(
+  stageName: string,
   ctxStage: StageFn,
   pick: (config: Config) => {
     runner: 'claude-cli' | 'copilot-cli';
@@ -152,12 +166,18 @@ function withRunner(
     const choice = pick(ctx.config);
     if (!choice) return ctxStage(ctx);
     const saved = ctx.runner;
-    ctx.runner = make({
-      cwd: ctx.cwd,
-      runner: choice.runner,
-      ...(choice.model ? { model: choice.model } : {}),
-      allowedCommands: ctx.config.dev.allowed_commands,
-    });
+    const via = { runner: choice.runner, model: choice.model };
+    ctx.runner = labelRunner(
+      make({
+        cwd: ctx.cwd,
+        runner: choice.runner,
+        ...(choice.model ? { model: choice.model } : {}),
+        allowedCommands: ctx.config.dev.allowed_commands,
+      }),
+      ctx.reporter,
+      originLabel([stageName], via),
+      via,
+    );
     try {
       await ctxStage(ctx);
     } finally {
@@ -179,20 +199,27 @@ export function buildStages(opts: {
       model: c.steps[name].model,
     });
   return {
-    grill: withRunner(createGrillStage({ io }), step('grill'), make),
+    grill: withRunner('grill', createGrillStage({ io }), step('grill'), make),
     recon: withRunner(
+      'recon',
       createReconStage({ io, refreshContext: opts.refreshContext }),
       step('recon'),
       make,
     ),
-    tasks: withRunner(createTasksStage(), step('tasks'), make),
+    tasks: withRunner('tasks', createTasksStage(), step('tasks'), make),
     approve: createHumanStop(io, opts.openEditor),
     build: withRunner(
+      'dev',
       createBuildStage({ io, makeRunner: make }),
       step('dev'),
       make,
     ),
-    lessons: withRunner(createLessonsStage({ io }), step('lessons'), make),
+    lessons: withRunner(
+      'lessons',
+      createLessonsStage({ io }),
+      step('lessons'),
+      make,
+    ),
   };
 }
 
@@ -250,7 +277,19 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       deps.makeRunner(config),
       join(run.dir, 'calls.jsonl'),
     );
+    const reporter: ProgressReporter = createProgressReporter({
+      write: createProgressWriter(run.dir),
+      stream: deps.stderr ?? process.stderr,
+      quiet: flags.quiet,
+      ...(deps.env ? { env: deps.env } : {}),
+    });
+    // The footer must not trample a readline prompt: it is erased while a question waits
+    io.setAskHooks?.({
+      before: () => reporter.pauseFooter(),
+      after: () => reporter.resumeFooter(),
+    });
     const ctx: RunContext = {
+      reporter,
       cwd,
       task,
       size,

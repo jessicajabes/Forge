@@ -62,6 +62,7 @@ Flags skip the questions:
 | `--no-arena` | Plain Dev, no arena |
 | `--arena <n>` | Number of arena candidates |
 | `--refresh-context` | Rebuild the shared context summary even if the repo did not change |
+| `--quiet` | No progress lines on the terminal. `progress.jsonl` is still written |
 
 `forge-jj` with no argument resumes the last interrupted run.
 
