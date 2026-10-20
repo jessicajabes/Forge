@@ -190,10 +190,10 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/arena.ts` (novo), `src/steps/dev.ts`, `test/arena.test.ts` (novo)
 - **O que fazer**: Implementar a 4.14: rubrica, N worktrees, candidatos em paralelo, juiz somente leitura, base e enxerto, verificação e `arena.md`. Tratar desistência (N-1, 1 e 0), divergência total e convergência sem enxerto. Os worktrees saem ao fim. Ligado por padrão; desligado na `trivial` e com `rodar sem arena`.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com testes para criação e remoção dos worktrees, desistência (N-1, 1 e 0), divergência total e convergência sem enxerto
-  - [ ] Teste confirma que os candidatos não recebem `git worktree` nem `git push`
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com testes para criação e remoção dos worktrees, desistência (N-1, 1 e 0), divergência total e convergência sem enxerto
+  - [x] Teste confirma que os candidatos não recebem `git worktree` nem `git push`
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T13, T19
 
 ## T21: Etapa Revisão com ciclos

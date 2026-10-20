@@ -13,3 +13,16 @@ export type RunRequest = {
 
 /** Returns the text of the artifact produced. */
 export type Runner = (req: RunRequest) => Promise<string>;
+
+/**
+ * Builds a Runner bound to a directory. The arena needs one per candidate worktree
+ * (DESIGN 4.14); the request itself stays the same, so `Runner` does not change.
+ */
+export type RunnerFactory = (opts: {
+  /** Where the agent works: the target repo or a worktree. */
+  cwd: string;
+  model?: string;
+  runner?: 'claude-cli' | 'copilot-cli';
+  /** The only shell commands an editing run may use. */
+  allowedCommands?: string[];
+}) => Runner;

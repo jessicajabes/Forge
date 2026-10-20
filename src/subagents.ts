@@ -99,3 +99,24 @@ export function assertAllOk(
   if (failed.length > 0) throw new SubagentEscalation(failed, completed);
   return completed;
 }
+
+/** Runs `fn` over `items`, at most `limit` at a time. Results keep the order of `items`. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index] as T, index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker),
+  );
+  return results;
+}

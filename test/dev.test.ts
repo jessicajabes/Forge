@@ -28,6 +28,8 @@ async function setup(yml = '') {
   const run = await createRun(cwd, 'adicionar coisas');
   await writeFile(join(run.dir, 'tasks.md'), TASKS);
   await writeFile(join(run.dir, 'spec.md'), '# Spec: x\n');
+  const config = parseConfig(yml);
+  config.dev.arena.candidates = 1; // these tests are about the plain Dev; the arena has its own
   const prompts: string[] = [];
   const edits: boolean[] = [];
   let n = 0;
@@ -43,7 +45,7 @@ async function setup(yml = '') {
     task: 'adicionar coisas',
     size: 'complete',
     run,
-    config: parseConfig(yml),
+    config,
     runner,
   };
   return { ctx, prompts, edits };
@@ -154,5 +156,23 @@ describe('dev stage', () => {
     expect(await git(ctx.cwd, ['rev-list', '--count', 'feature/x..HEAD'])).toBe(
       '3',
     );
+  });
+});
+
+describe('dev stage and the arena switch', () => {
+  it('refuses to start with the arena on and no runner factory', async () => {
+    const { ctx } = await setup();
+    ctx.config.dev.arena.candidates = 3;
+    await expect(createDevStage({ io: createFakeIO([]) })(ctx)).rejects.toThrow(
+      /fábrica de runners/,
+    );
+  });
+
+  it('a trivial task runs a plain Dev even with the arena configured on', async () => {
+    const { ctx, edits } = await setup();
+    ctx.config.dev.arena.candidates = 3;
+    ctx.size = 'trivial';
+    await createDevStage({ io: createFakeIO([]) })(ctx);
+    expect(edits).toEqual([true]);
   });
 });

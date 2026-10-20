@@ -101,3 +101,25 @@ export async function diffBetween(
 ): Promise<string> {
   return git(cwd, ['diff', from, to]);
 }
+
+export async function addWorktree(cwd: string, dir: string): Promise<void> {
+  await git(cwd, ['worktree', 'add', '--detach', '-q', dir, 'HEAD']);
+}
+
+export async function removeWorktree(cwd: string, dir: string): Promise<void> {
+  await git(cwd, ['worktree', 'remove', '--force', dir]).catch(() => undefined);
+  await git(cwd, ['worktree', 'prune']).catch(() => undefined);
+}
+
+/** Everything the worktree changed against HEAD, new files included, as a binary-safe patch. */
+export async function workingDiff(cwd: string): Promise<string> {
+  await git(cwd, ['add', '-A']);
+  return git(cwd, ['diff', '--cached', '--binary', 'HEAD']);
+}
+
+export async function applyPatchFile(
+  cwd: string,
+  patchPath: string,
+): Promise<void> {
+  await git(cwd, ['apply', '--whitespace=nowarn', patchPath]);
+}

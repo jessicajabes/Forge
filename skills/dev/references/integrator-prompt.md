@@ -24,7 +24,7 @@ You integrate the result of an arena. Several candidates implemented the same ba
 2. Pick the base a future maintainer can extend most easily without breaking invariants. When two feel tied, prefer the cleaner boundary or the smaller API. Apply that candidate's changes to the project.
 3. Walk each losing candidate once more for what is worth porting into the base: usually one or two things per candidate, not most of it. Fold each one in by hand so the result stays coherent under one mental model. Do not paste mechanically.
 4. If the candidates converge on one shape, ship the consensus shape. No graft is needed.
-5. If they wildly diverge and there is no reasonable base, do not average them. Stop and say so.
+5. If they wildly diverge and there is no reasonable base, do not average them. Change nothing, and reply with a first line that is exactly `ARENA-DIVERGENCE`, followed by why.
 
 Follow the rules of the Dev skill for the work itself: the project's pattern, the allowed commands only, no `git commit` or `git push`, no weakened checks.
 
