@@ -2,7 +2,9 @@ import type { Config } from './config.js';
 import { readState, writeState } from './state.js';
 import type { Run } from './runs.js';
 import type { Runner } from './runner.js';
+import { failureReason } from './progressReporter.js';
 import type { ProgressReporter } from './progressReporter.js';
+import type { RunnerVia } from './subagents.js';
 
 /**
  * The stages of DESIGN section 1, plus the human stop of 4.10 between Tasks and Dev.
@@ -32,6 +34,8 @@ export type RunContext = {
   runner: Runner;
   /** Where the stage lines go. Absent: the stages run without progress output. */
   reporter?: ProgressReporter;
+  /** The runner and model behind `runner` in the current stage, for the progress labels. */
+  via?: RunnerVia;
 };
 
 export type StageFn = (ctx: RunContext) => Promise<void>;
@@ -88,18 +92,23 @@ export async function runWorkflow(
     if (completed.has(name)) continue;
     const stage = { stage: name, index: position + 1, total: planned.length };
     const started = Date.now();
-    const reportEnd = () =>
+    const reportEnd = (failure?: { reason: string }) =>
       ctx.reporter?.report({
         type: 'stage',
         phase: 'end',
         ...stage,
         ms: Date.now() - started,
+        ok: failure === undefined,
+        ...failure,
       });
     await ctx.reporter?.report({ type: 'stage', phase: 'start', ...stage });
     try {
       await stages[name](ctx);
     } catch (error) {
-      await reportEnd();
+      await reportEnd({
+        reason:
+          error instanceof RunCancelled ? 'cancelada' : failureReason(error),
+      });
       if (error instanceof RunCancelled) {
         await save('cancelled');
         return { status: 'cancelled', stagesRun };

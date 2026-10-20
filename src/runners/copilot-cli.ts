@@ -108,7 +108,10 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
         stdio: ['ignore', 'pipe', 'pipe'],
       }));
 
-  return async (req) => {
+  const limitFor = (canEdit: boolean) =>
+    canEdit ? opts.editTimeoutMs : (opts.timeoutMs ?? 30 * 60_000);
+
+  const runner: Runner = async (req) => {
     const files =
       req.files.length > 0
         ? `Arquivos relevantes:\n${req.files.map((f) => `- ${f}`).join('\n')}\n\n`
@@ -134,9 +137,7 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
       });
       let stdout = '';
       let stderr = '';
-      const timeout = req.canEdit
-        ? opts.editTimeoutMs
-        : (opts.timeoutMs ?? 30 * 60_000);
+      const timeout = limitFor(req.canEdit);
       const timer =
         timeout === undefined
           ? undefined
@@ -182,4 +183,6 @@ export function createCopilotCliRunner(opts: CopilotCliOptions): Runner {
       });
     });
   };
+  runner.limitFor = limitFor;
+  return runner;
 }

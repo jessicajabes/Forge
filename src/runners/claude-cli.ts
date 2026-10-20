@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { maskSecrets } from '../progress.js';
 import {
   INACTIVITY_MS,
   INACTIVITY_REPEAT_MS,
@@ -212,29 +213,37 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       }));
 
   const clock = opts.clock ?? realClock;
+  const limitFor = (canEdit: boolean) =>
+    canEdit ? opts.editTimeoutMs : (opts.timeoutMs ?? 30 * 60_000);
 
-  return (req) =>
+  const runner: Runner = (req) =>
     new Promise<string>((resolve, reject) => {
       const { args, env, stdin } = buildInvocation(req, opts);
       const child = start('claude', args, { cwd: opts.cwd, env });
       let stdout = '';
       let stderr = '';
       let pending = '';
+      // Set once the call ended (timeout, error or close): nothing more is reported.
+      let settled = false;
       const emit = (line: string) => {
-        if (!req.onEvent) return;
+        if (settled || !req.onEvent) return;
         for (const e of parseStreamEvents(line)) req.onEvent(e);
       };
       let lastEventAt = clock.now();
+      // True once an inactivity warning went out, until output shows up again.
+      let warned = false;
       let cancelWatch = () => {};
       // Restarts the wait: no stream line for 2 minutes, then again every 5.
       const watch = () => {
         cancelWatch();
         if (!req.onEvent) return;
-        const report = () =>
+        const report = () => {
+          warned = true;
           req.onEvent?.({
             type: 'inactivity',
             idleMs: clock.now() - lastEventAt,
           });
+        };
         let cancelRepeat = () => {};
         const cancelFirst = clock.setTimeout(() => {
           report();
@@ -246,13 +255,12 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         };
       };
       watch();
-      const limit = req.canEdit
-        ? opts.editTimeoutMs
-        : (opts.timeoutMs ?? 30 * 60_000);
+      const limit = limitFor(req.canEdit);
       const cancelTimer =
         limit === undefined
           ? () => {}
           : clock.setTimeout(() => {
+              settled = true;
               cancelWatch();
               child.kill('SIGTERM');
               reject(
@@ -267,18 +275,23 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       child.stdout?.on('data', (chunk: Buffer) => {
         const text = chunk.toString();
         stdout += text;
-        if (!req.onEvent) return;
+        if (settled || !req.onEvent) return;
         pending += text;
         const lines = pending.split('\n');
         pending = lines.pop() ?? '';
         if (lines.some((l) => l.trim())) {
           lastEventAt = clock.now();
+          if (warned) {
+            warned = false;
+            req.onEvent({ type: 'activity' });
+          }
           watch();
         }
         lines.forEach(emit);
       });
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
       child.on('error', (error) => {
+        settled = true;
         cancelTimer();
         cancelWatch();
         reject(
@@ -291,6 +304,7 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         cancelTimer();
         cancelWatch();
         emit(pending);
+        settled = true;
         pending = '';
         try {
           resolve(parseStream(stdout));
@@ -298,7 +312,7 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
           const detail =
             code === 0
               ? ''
-              : ` (código ${code}: ${stderr.trim().slice(0, 300)})`;
+              : ` (código ${code}: ${maskSecrets(stderr.trim()).slice(0, 300)})`;
           reject(
             new ClaudeCliError(`${(error as Error).message}${detail}`, {
               stderr,
@@ -309,4 +323,6 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       });
       child.stdin?.end(stdin);
     });
+  runner.limitFor = limitFor;
+  return runner;
 }

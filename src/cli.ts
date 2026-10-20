@@ -166,7 +166,9 @@ function withRunner(
     const choice = pick(ctx.config);
     if (!choice) return ctxStage(ctx);
     const saved = ctx.runner;
+    const savedVia = ctx.via;
     const via = { runner: choice.runner, model: choice.model };
+    ctx.via = via;
     ctx.runner = labelRunner(
       make({
         cwd: ctx.cwd,
@@ -182,6 +184,8 @@ function withRunner(
       await ctxStage(ctx);
     } finally {
       ctx.runner = saved;
+      if (savedVia) ctx.via = savedVia;
+      else delete ctx.via;
     }
   };
 }
@@ -278,7 +282,11 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       join(run.dir, 'calls.jsonl'),
     );
     const reporter: ProgressReporter = createProgressReporter({
-      write: createProgressWriter(run.dir),
+      write: createProgressWriter(run.dir, undefined, (error) =>
+        (deps.stderr ?? process.stderr).write(
+          `Aviso: não consegui gravar o progress.jsonl (${error instanceof Error ? error.message : String(error)}). O log em disco pode estar incompleto.\n`,
+        ),
+      ),
       stream: deps.stderr ?? process.stderr,
       quiet: flags.quiet,
       ...(deps.env ? { env: deps.env } : {}),
@@ -288,6 +296,16 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       before: () => reporter.pauseFooter(),
       after: () => reporter.resumeFooter(),
     });
+    // Same for stdout lines written while calls run: erase the footer, write, redraw.
+    const write = io.write.bind(io);
+    io.write = (text) => {
+      reporter.pauseFooter();
+      try {
+        write(text);
+      } finally {
+        reporter.resumeFooter();
+      }
+    };
     const ctx: RunContext = {
       reporter,
       cwd,

@@ -1,5 +1,5 @@
 import { appendFile } from 'node:fs/promises';
-import type { RunnerFactory, RunRequest } from './runner.js';
+import type { Runner, RunnerFactory, RunRequest } from './runner.js';
 
 export type CallRecord = {
   at: string;
@@ -20,7 +20,7 @@ export type CallRecord = {
 export function logCalls(factory: RunnerFactory, path: string): RunnerFactory {
   return (opts) => {
     const runner = factory(opts);
-    return async (req) => {
+    const logged: Runner = async (req) => {
       const started = Date.now();
       let realModel: string | undefined;
       const onEvent: NonNullable<RunRequest['onEvent']> = (event) => {
@@ -51,5 +51,8 @@ export function logCalls(factory: RunnerFactory, path: string): RunnerFactory {
         throw error;
       }
     };
+    // The footer reads the time limit from the runner: wrapping must not hide it.
+    if (runner.limitFor) logged.limitFor = runner.limitFor;
+    return logged;
   };
 }

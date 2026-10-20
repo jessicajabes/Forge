@@ -194,7 +194,12 @@ export function createReconStage(options: ReconOptions): StageFn {
             .replace('{QUESTION}', QUESTION)
             .replace('{EXPLORATION_ANGLE}', angle.text)}`,
         })),
-        { maxParallel: ctx.config.subagents.max_parallel },
+        {
+          maxParallel: ctx.config.subagents.max_parallel,
+          reporter: ctx.reporter,
+          origin: 'recon',
+          ...(ctx.via ? { via: ctx.via } : {}),
+        },
       );
       findings = assertAllOk(results)
         .map((r) => `### Explorer: ${r.id}\n\n${r.text}`)

@@ -58,6 +58,40 @@ const stepEnd: ProgressEvent = {
   ms: 42_000,
 };
 
+describe('formatEvent with text from the agent', () => {
+  it('drops escape sequences and control characters from every field', () => {
+    const evil = '\x1b[2K\x1b[1A\r✓ ok\x07';
+    const lines = formatEvent(
+      {
+        type: 'tool',
+        id: 'c1',
+        label: LABEL,
+        name: `Read${evil}`,
+        arg: `x${evil}.ts`,
+      },
+      false,
+    );
+    expect(lines).toEqual([`[${LABEL}] Read✓ ok x✓ ok.ts`]);
+    const all = [
+      ...formatEvent({ ...endErr, reason: evil, stderr: `a${evil}b` }, true),
+      ...formatEvent(
+        { type: 'model', id: 'c1', label: LABEL, model: `m${evil}` },
+        true,
+      ),
+    ].join('\n');
+    // Only the formatter's own colors remain: no \r, no stray cursor moves.
+    expect(all).not.toMatch(/\r|\x1b\[2K|\x1b\[1A|\x07/); // eslint-disable-line no-control-regex
+  });
+
+  it('cuts a very long tool name', () => {
+    const [line] = formatEvent(
+      { ...tool, type: 'tool', name: 'N'.repeat(500), arg: '' },
+      false,
+    );
+    expect(line?.length).toBeLessThan(LABEL.length + 110);
+  });
+});
+
 describe('shouldStyle', () => {
   it('is true only with a TTY and NO_COLOR undefined', () => {
     expect(shouldStyle({ isTTY: true }, {})).toBe(true);
@@ -129,6 +163,20 @@ describe('formatEvent as plain text (no TTY or NO_COLOR set)', () => {
     );
     expect(formatEvent(stageEnd, false)[0]).toBe('etapa dev (3/7) em 4s');
     expect(formatEvent(stepEnd, false)[0]).toBe('[build] ok em 42s');
+  });
+
+  it('marks a failed stage as erro, with the reason, in plain text and styled', () => {
+    const failed: ProgressEvent = {
+      ...stageEnd,
+      ok: false,
+      reason: 'cancelada',
+    } as ProgressEvent;
+    expect(formatEvent(failed, false)[0]).toBe(
+      'etapa dev (3/7) erro em 4s: cancelada',
+    );
+    const styledLine = formatEvent(failed, true)[0] ?? '';
+    expect(styledLine).toContain('✗ erro');
+    expect(styledLine).not.toContain('✓');
   });
 
   it('shows the tool name with its argument', () => {

@@ -44,6 +44,8 @@ export class SubagentEscalation extends Error {
 }
 
 let nextCallId = 0;
+/** A resumed run appends to the same progress.jsonl: ids must not repeat across processes. */
+const processTag = Date.now().toString(36);
 
 /** A labelled runner remembers the one it wraps, so labelling it again does not nest. */
 const wrapped = new WeakMap<Runner, Runner>();
@@ -66,14 +68,16 @@ export function labelRunner(
 ): Runner {
   if (!reporter) return runner;
   const base = wrapped.get(runner) ?? runner;
-  const labelled: Runner = (req) =>
-    reporter.trackCall(
+  const labelled: Runner = (req) => {
+    const limitMs = base.limitFor?.(req.canEdit);
+    return reporter.trackCall(
       {
-        id: `call-${++nextCallId}`,
+        id: `call-${processTag}-${++nextCallId}`,
         label,
         runner: via?.runner ?? 'runner',
         model: via?.model ?? null,
         canEdit: req.canEdit,
+        ...(limitMs !== undefined ? { limitMs } : {}),
       },
       (onEvent) =>
         base({
@@ -84,6 +88,8 @@ export function labelRunner(
           },
         }),
     );
+  };
+  if (base.limitFor) labelled.limitFor = base.limitFor;
   wrapped.set(labelled, base);
   return labelled;
 }

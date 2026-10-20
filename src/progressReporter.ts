@@ -1,7 +1,13 @@
 import { RunnerError, RunnerTimeoutError } from './runner.js';
 import type { RunnerEvent } from './runner.js';
+import { maskEvent, maskSecrets } from './progress.js';
 import type { ProgressEvent, ProgressWriter } from './progress.js';
-import { formatDuration, formatEvent, shouldStyle } from './progressFormat.js';
+import {
+  clean,
+  formatDuration,
+  formatEvent,
+  shouldStyle,
+} from './progressFormat.js';
 
 export type ProgressReporterOptions = {
   /** Writes every event to progress.jsonl. Always called, even when quiet. */
@@ -56,7 +62,8 @@ const GRAY = '\x1b[90m';
 const YELLOW = '\x1b[33m';
 const RESET = '\x1b[0m';
 
-function failureReason(error: unknown): string {
+/** One line saying why a call or stage failed, without secrets. Never empty. */
+export function failureReason(error: unknown): string {
   if (error instanceof RunnerTimeoutError) {
     return `encerrado por timeout após ${formatDuration(error.limitMs)}`;
   }
@@ -64,7 +71,7 @@ function failureReason(error: unknown): string {
     return `código de saída ${error.exitCode}`;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return message.split(/\r?\n/)[0] ?? message;
+  return maskSecrets(message.split(/\r?\n/)[0]?.trim() || 'erro');
 }
 
 export function createProgressReporter(
@@ -72,8 +79,8 @@ export function createProgressReporter(
 ): ProgressReporter {
   const { write, stream, quiet = false, now = Date.now } = options;
   const styled = shouldStyle(stream, options.env);
-  // The footer rewrites the line in place, so it exists only where the lines are styled.
-  const footerOn = styled && !quiet;
+  // The footer rewrites the line in place with \r: it needs a TTY, not color.
+  const footerOn = stream.isTTY === true && !quiet;
   const running = new Map<string, Running>();
   let paused = 0;
   let footerShown = false;
@@ -81,9 +88,12 @@ export function createProgressReporter(
 
   const footerText = (): string => {
     const max = (stream.columns ?? 80) - 1;
+    const gray = styled ? GRAY : '';
+    const yellow = styled ? YELLOW : '';
+    const entries = [...running.values()];
     const parts: string[] = [];
     let used = 0;
-    for (const entry of running.values()) {
+    for (const [position, entry] of entries.entries()) {
       const elapsed = formatDuration(now() - entry.started);
       const time =
         entry.limitMs === undefined
@@ -93,18 +103,21 @@ export function createProgressReporter(
         entry.idleSince === undefined
           ? ''
           : ` · sem atividade há ${formatDuration(now() - entry.idleSince)}`;
-      const head = `${entry.label} ${time}`;
+      const head = `${clean(entry.label)} ${time}`;
       const cost =
         head.length +
         idle.length +
         (parts.length > 0 ? FOOTER_SEPARATOR.length : 0);
-      if (used + cost > max) {
+      // Unless this is the last entry, keep room for the separator and the '…'.
+      const reserve =
+        position < entries.length - 1 ? FOOTER_SEPARATOR.length + 1 : 0;
+      if (used + cost + reserve > max) {
         // Never wrap: a wrapped footer could not be erased with one carriage return.
         parts.push(parts.length === 0 ? `${head.slice(0, max - 1)}…` : '…');
         break;
       }
       used += cost;
-      parts.push(idle ? `${head}${YELLOW}${idle}${GRAY}` : head);
+      parts.push(idle ? `${head}${yellow}${idle}${gray}` : head);
     }
     return parts.join(FOOTER_SEPARATOR);
   };
@@ -117,7 +130,11 @@ export function createProgressReporter(
 
   const draw = (): void => {
     if (!footerOn || paused > 0 || running.size === 0) return;
-    stream.write(`${ERASE_LINE}${GRAY}${footerText()}${RESET}`);
+    stream.write(
+      styled
+        ? `${ERASE_LINE}${GRAY}${footerText()}${RESET}`
+        : `${ERASE_LINE}${footerText()}`,
+    );
     footerShown = true;
   };
 
@@ -129,7 +146,8 @@ export function createProgressReporter(
         }
         break;
       case 'tool':
-      case 'model': {
+      case 'model':
+      case 'activity': {
         const entry = running.get(event.id);
         if (entry) delete entry.idleSince;
         break;
@@ -169,7 +187,7 @@ export function createProgressReporter(
     await write(event);
     if (quiet) return;
     erase();
-    for (const line of formatEvent(event, styled)) {
+    for (const line of formatEvent(maskEvent(event), styled)) {
       stream.write(line + '\n');
     }
     if (footerOn) {
@@ -178,7 +196,10 @@ export function createProgressReporter(
     }
   };
 
-  const trackCall: ProgressReporter['trackCall'] = async (info, run) => {
+  async function trackCall<T>(
+    info: CallInfo,
+    run: (onEvent: (event: RunnerEvent) => void) => Promise<T>,
+  ): Promise<T> {
     const started = now();
     const { limitMs, ...startInfo } = info;
     const { id, label } = info;
@@ -190,9 +211,13 @@ export function createProgressReporter(
       });
     }
     // Events arrive synchronously from the runner; keep their order on the way out.
-    let pending: Promise<void> = report({ type: 'call-start', ...startInfo });
+    // A progress failure must never fail the call, so every link swallows its error.
+    let pending: Promise<void> = report({
+      type: 'call-start',
+      ...startInfo,
+    }).catch(() => undefined);
     const queue = (event: ProgressEvent): void => {
-      pending = pending.then(() => report(event));
+      pending = pending.then(() => report(event)).catch(() => undefined);
     };
     const onEvent = (event: RunnerEvent): void => {
       switch (event.type) {
@@ -205,13 +230,14 @@ export function createProgressReporter(
         case 'inactivity':
           queue({ type: 'inactivity', id, label, idleMs: event.idleMs });
           break;
+        case 'activity':
+          queue({ type: 'activity', id, label });
+          break;
       }
     };
+    let output: T;
     try {
-      const output = await run(onEvent);
-      queue({ type: 'call-end', id, label, ok: true, ms: now() - started });
-      await pending;
-      return output;
+      output = await run(onEvent);
     } catch (error) {
       const ms = now() - started;
       if (error instanceof RunnerTimeoutError) {
@@ -222,7 +248,7 @@ export function createProgressReporter(
           label,
           limitMs: error.limitMs,
         };
-        pending = pending.then(() => write(timeout));
+        pending = pending.then(() => write(timeout)).catch(() => undefined);
       }
       queue({
         type: 'call-end',
@@ -236,7 +262,10 @@ export function createProgressReporter(
       await pending;
       throw error;
     }
-  };
+    queue({ type: 'call-end', id, label, ok: true, ms: now() - started });
+    await pending;
+    return output;
+  }
 
   const pauseFooter = (): void => {
     paused += 1;

@@ -6,6 +6,7 @@ export const INACTIVITY_REPEAT_MS = 5 * 60 * 1000;
 export const ARG_MAX_CHARS = 100;
 export const STDERR_TAIL_LINES = 5;
 export const STDERR_LINE_MAX_CHARS = 200;
+export const STDERR_LOG_MAX_CHARS = 2048;
 export const PROGRESS_FILE = 'progress.jsonl';
 
 export type ProgressEvent =
@@ -29,6 +30,7 @@ export type ProgressEvent =
   | { type: 'tool'; id: string; label: string; name: string; arg: string }
   | { type: 'model'; id: string; label: string; model: string }
   | { type: 'inactivity'; id: string; label: string; idleMs: number }
+  | { type: 'activity'; id: string; label: string }
   | { type: 'timeout'; id: string; label: string; limitMs: number }
   | {
       type: 'stage';
@@ -37,6 +39,8 @@ export type ProgressEvent =
       index: number;
       total: number;
       ms?: number;
+      ok?: boolean;
+      reason?: string;
     }
   | {
       type: 'step';
@@ -59,6 +63,43 @@ export type ProgressEvent =
 export type TimedProgressEvent = ProgressEvent & { at: string };
 
 export type ProgressWriter = (event: ProgressEvent) => Promise<void>;
+
+const SECRET_PATTERNS: [RegExp, string][] = [
+  [
+    /\b([A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Za-z0-9_]*)=\S+/gi,
+    '$1=***',
+  ],
+  [/\bBearer\s+\S+/gi, 'Bearer ***'],
+];
+
+/** Hides credentials in command lines and CLI output before they reach the disk. */
+export function maskSecrets(text: string): string {
+  return SECRET_PATTERNS.reduce(
+    (out, [pattern, replacement]) => out.replace(pattern, replacement),
+    text,
+  );
+}
+
+/** The event as it may leave the process: secrets hidden in every free-text field. */
+export function maskEvent(event: ProgressEvent): ProgressEvent {
+  switch (event.type) {
+    case 'call-end':
+      return {
+        ...event,
+        ...(event.reason ? { reason: maskSecrets(event.reason) } : {}),
+        // Mask first, then keep the tail: a cut inside `KEY=value` must not leak the value.
+        ...(event.stderr
+          ? { stderr: maskSecrets(event.stderr).slice(-STDERR_LOG_MAX_CHARS) }
+          : {}),
+      };
+    case 'stage':
+      return event.reason
+        ? { ...event, reason: maskSecrets(event.reason) }
+        : event;
+    default:
+      return event;
+  }
+}
 
 function cut(text: string, max = ARG_MAX_CHARS): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
@@ -92,7 +133,7 @@ export function summarizeToolArg(name: string, input: unknown): string {
       return cut(path === undefined ? `"${pattern}"` : `"${pattern}" ${path}`);
     }
     case 'Bash':
-      return cut(str(args.command) ?? '');
+      return cut(maskSecrets(str(args.command) ?? ''));
     default:
       return '';
   }
@@ -101,15 +142,25 @@ export function summarizeToolArg(name: string, input: unknown): string {
 /**
  * Appends every event, with a timestamp, as one JSON line in progress.jsonl of the run
  * folder. It always writes, whatever is shown on the terminal, and never adds color.
- * A write failure is swallowed: progress must not break a run.
+ * A write failure never breaks the run, but it is not silent: `onError` hears the first
+ * one (disk full, permission denied, missing folder), once.
  */
 export function createProgressWriter(
   runDir: string,
   now: () => Date = () => new Date(),
+  onError?: (error: unknown) => void,
 ): ProgressWriter {
   const path = join(runDir, PROGRESS_FILE);
+  let warned = false;
   return (event) => {
-    const line: TimedProgressEvent = { at: now().toISOString(), ...event };
-    return appendFile(path, `${JSON.stringify(line)}\n`).catch(() => undefined);
+    const line: TimedProgressEvent = {
+      at: now().toISOString(),
+      ...maskEvent(event),
+    };
+    return appendFile(path, `${JSON.stringify(line)}\n`).catch((error) => {
+      if (warned) return;
+      warned = true;
+      onError?.(error);
+    });
   };
 }

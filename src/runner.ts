@@ -2,7 +2,9 @@
 export type RunnerEvent =
   | { type: 'model'; model: string }
   | { type: 'tool'; name: string; arg: string }
-  | { type: 'inactivity'; idleMs: number };
+  | { type: 'inactivity'; idleMs: number }
+  /** Output came back after an inactivity warning: the agent is working again. */
+  | { type: 'activity' };
 
 /** A failed runner call. Carries the CLI's full stderr and exit code for the reporter. */
 export class RunnerError extends Error {
@@ -45,7 +47,10 @@ export type RunRequest = {
 };
 
 /** Returns the text of the artifact produced. */
-export type Runner = (req: RunRequest) => Promise<string>;
+export type Runner = ((req: RunRequest) => Promise<string>) & {
+  /** Optional: the time limit of a call, for the footer. undefined = no limit. */
+  limitFor?: (canEdit: boolean) => number | undefined;
+};
 
 /**
  * Builds a Runner bound to a directory. The arena needs one per candidate worktree

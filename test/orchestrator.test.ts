@@ -196,6 +196,80 @@ describe('runWorkflow', () => {
     expect(fake.calls).toHaveLength(3);
   });
 
+  it('gives a stage with an empty error message the reason "erro"', async () => {
+    const base = await setup('complete');
+    const fake = createFakeRunner([SPEC, 'contexto', TASKS]);
+    const events: ProgressEvent[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: () => true },
+      quiet: true,
+    });
+    const stages = stubStages();
+    stages.approve = async () => {
+      throw new Error('');
+    };
+    await expect(
+      runWorkflow({ ...base, runner: fake.runner, reporter }, stages),
+    ).rejects.toThrow();
+    const failed = events.find(
+      (e) => e.type === 'stage' && e.phase === 'end' && e.ok === false,
+    );
+    expect(failed).toMatchObject({ reason: 'erro' });
+  });
+
+  it('reports a failing or cancelled stage as not ok', async () => {
+    const base = await setup('complete');
+    const fake = createFakeRunner([SPEC, 'contexto', TASKS]);
+    const events: ProgressEvent[] = [];
+    const reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: () => true },
+      quiet: true,
+    });
+    const stages = stubStages();
+    stages.approve = async () => {
+      throw new RunCancelled();
+    };
+    await runWorkflow({ ...base, runner: fake.runner, reporter }, stages);
+    const ends = events.flatMap((e) =>
+      e.type === 'stage' && e.phase === 'end' ? [e] : [],
+    );
+    expect(ends.map((e) => [e.stage, e.ok])).toEqual([
+      ['grill', true],
+      ['recon', true],
+      ['tasks', true],
+      ['approve', false],
+    ]);
+    expect(ends[3]?.reason).toBe('cancelada');
+
+    const failing = await setup('complete');
+    const failEvents: ProgressEvent[] = [];
+    const failReporter = createProgressReporter({
+      write: async (event) => {
+        failEvents.push(event);
+      },
+      stream: { write: () => true },
+      quiet: true,
+    });
+    await expect(
+      runWorkflow(
+        {
+          ...failing,
+          runner: createFakeRunner(['not a spec']).runner,
+          reporter: failReporter,
+        },
+        stubStages(),
+      ),
+    ).rejects.toThrow(/spec.md/);
+    const last = failEvents.at(-1);
+    expect(last).toMatchObject({ type: 'stage', phase: 'end', ok: false });
+  });
+
   it('lets other errors through', async () => {
     const base = await setup('complete');
     const fake = createFakeRunner(['not a spec']);

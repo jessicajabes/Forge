@@ -1,4 +1,5 @@
 import {
+  ARG_MAX_CHARS,
   STDERR_LINE_MAX_CHARS,
   STDERR_TAIL_LINES,
   type ProgressEvent,
@@ -20,12 +21,24 @@ export function shouldStyle(
   return stream.isTTY === true && env.NO_COLOR === undefined;
 }
 
+// Both patterns match control characters on purpose: that is what they strip.
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g; // eslint-disable-line no-control-regex
+const CONTROL_CHARS = /[\x00-\x08\x0a-\x1f\x7f]/g; // eslint-disable-line no-control-regex
+
+/**
+ * Text that came from an agent or the target repo can carry escape sequences or \r that
+ * would fake a status line or move the cursor. Drop them before anything reaches the TTY.
+ */
+export function clean(text: string): string {
+  return text.replace(ANSI_SEQUENCE, '').replace(CONTROL_CHARS, '');
+}
+
 function paint(color: string, text: string, styled: boolean): string {
   return styled ? `${color}${text}${RESET}` : text;
 }
 
 function prefix(label: string, styled: boolean): string {
-  return paint(GRAY, `[${label}]`, styled);
+  return paint(GRAY, `[${clean(label)}]`, styled);
 }
 
 export function formatDuration(ms: number): string {
@@ -48,7 +61,7 @@ function cutLine(text: string, max: number): string {
 export function stderrExcerpt(stderr: string): string[] {
   return stderr
     .split(/\r?\n/)
-    .map((line) => line.trimEnd())
+    .map((line) => clean(line).trimEnd())
     .filter((line) => line.trim().length > 0)
     .slice(-STDERR_TAIL_LINES)
     .map((line) => cutLine(line, STDERR_LINE_MAX_CHARS));
@@ -71,12 +84,13 @@ export function formatEvent(event: ProgressEvent, styled: boolean): string[] {
       const model = event.model ?? DEFAULT_MODEL;
       const start = styled ? '▶ ' : '';
       return [
-        `${prefix(event.label, styled)} ${start}${event.runner} · modelo: ${model} · ${mode}`,
+        `${prefix(event.label, styled)} ${start}${clean(event.runner)} · modelo: ${clean(model)} · ${mode}`,
       ];
     }
     case 'call-end': {
       const head = withDuration(result(event.ok, styled), event.ms);
-      const reason = event.ok || !event.reason ? '' : `: ${event.reason}`;
+      const reason =
+        event.ok || !event.reason ? '' : `: ${clean(event.reason)}`;
       const lines = [`${prefix(event.label, styled)} ${head}${reason}`];
       if (!event.ok && event.stderr) {
         for (const line of stderrExcerpt(event.stderr)) {
@@ -86,15 +100,19 @@ export function formatEvent(event: ProgressEvent, styled: boolean): string[] {
       return lines;
     }
     case 'tool': {
-      const text = event.arg ? `${event.name} ${event.arg}` : event.name;
+      const name = cutLine(clean(event.name), ARG_MAX_CHARS);
+      const arg = clean(event.arg);
+      const text = arg ? `${name} ${arg}` : name;
       return [`${prefix(event.label, styled)} ${text}`];
     }
     case 'model':
-      return [`${prefix(event.label, styled)} modelo: ${event.model}`];
+      return [`${prefix(event.label, styled)} modelo: ${clean(event.model)}`];
     case 'inactivity': {
       const text = `${styled ? '⏳ ' : ''}sem atividade há ${formatDuration(event.idleMs)}`;
       return [`${prefix(event.label, styled)} ${paint(YELLOW, text, styled)}`];
     }
+    case 'activity':
+      return [`${prefix(event.label, styled)} voltou a ter atividade`];
     case 'timeout': {
       const text = `${styled ? '✗ ' : ''}encerrado por timeout após ${formatDuration(event.limitMs)}`;
       return [`${prefix(event.label, styled)} ${paint(RED, text, styled)}`];
@@ -104,6 +122,12 @@ export function formatEvent(event: ProgressEvent, styled: boolean): string[] {
       if (event.phase === 'start') {
         return [paint(GRAY, `${styled ? '▶ ' : ''}${name}`, styled)];
       }
+      if (event.ok === false) {
+        const reason = event.reason ? `: ${clean(event.reason)}` : '';
+        return [
+          `${name} ${withDuration(result(false, styled), event.ms)}${reason}`,
+        ];
+      }
       const done = styled ? `${paint(GREEN, '✓', styled)} ` : '';
       return [`${done}${withDuration(name, event.ms)}`];
     }
@@ -111,7 +135,7 @@ export function formatEvent(event: ProgressEvent, styled: boolean): string[] {
     case 'worktree': {
       const head = prefix(event.id, styled);
       if (event.phase === 'start') {
-        return [`${head} ${styled ? '▶ ' : ''}${event.label}`];
+        return [`${head} ${styled ? '▶ ' : ''}${clean(event.label)}`];
       }
       return [`${head} ${withDuration(result(event.ok, styled), event.ms)}`];
     }

@@ -39,6 +39,42 @@ async function setup(quiet = false) {
   return { reporter, out, lines };
 }
 
+describe('progress reporter failures', () => {
+  it('a failing progress write does not fail or replace the result of the call', async () => {
+    let writes = 0;
+    const reporter = createProgressReporter({
+      write: async () => {
+        writes += 1;
+        throw new Error('disco cheio');
+      },
+      stream: { write: () => undefined, isTTY: false },
+      env: {},
+    });
+    await expect(
+      reporter.trackCall(info, async (onEvent) => {
+        onEvent({ type: 'tool', name: 'Read', arg: 'x' });
+        return 'texto';
+      }),
+    ).resolves.toBe('texto');
+    expect(writes).toBe(3);
+  });
+
+  it('a failing progress write does not mask the error of the runner', async () => {
+    const reporter = createProgressReporter({
+      write: async () => {
+        throw new Error('disco cheio');
+      },
+      stream: { write: () => undefined, isTTY: false },
+      env: {},
+    });
+    await expect(
+      reporter.trackCall(info, async () => {
+        throw new RunnerError('falhou de verdade');
+      }),
+    ).rejects.toThrow('falhou de verdade');
+  });
+});
+
 describe('progress reporter', () => {
   it('prints the end lines of an error and a timeout and writes progress.jsonl', async () => {
     const { reporter, out, lines } = await setup();
@@ -114,6 +150,33 @@ describe('progress reporter', () => {
     expect(text).not.toContain('/30m');
   });
 
+  it('drops the inactivity notice from the footer once the agent is active again', async () => {
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns: 120 },
+      env: {},
+      now: () => 0,
+    });
+
+    await reporter.trackCall(info, async (onEvent) => {
+      onEvent({ type: 'inactivity', idleMs: 120_000 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const warned = out.join('');
+      expect(warned).toContain('sem atividade há 2m');
+      out.length = 0;
+      onEvent({ type: 'activity' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      reporter.pauseFooter();
+      reporter.resumeFooter();
+      return 'done';
+    });
+
+    const after = out.join('');
+    expect(after).toContain('voltou a ter atividade');
+    expect(after).not.toContain('sem atividade há');
+  });
+
   it('draws and erases the footer in place on a TTY', async () => {
     const out: string[] = [];
     const reporter = createProgressReporter({
@@ -138,6 +201,56 @@ describe('progress reporter', () => {
     const text = out.join('');
     expect(text).toContain('candidato 1 0s/30m');
     expect(text.indexOf('\r\x1b[2K<ask>')).toBeGreaterThan(-1);
+  });
+
+  it('draws the footer without color codes when NO_COLOR is set on a TTY', async () => {
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns: 80 },
+      env: { NO_COLOR: '1' },
+      now: () => 0,
+    });
+
+    await reporter.trackCall(
+      { ...info, label: 'candidato 1', limitMs: 30 * 60 * 1000 },
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return 'done';
+      },
+    );
+
+    const text = out.join('');
+    expect(text).toContain('\r\x1b[2Kcandidato 1 0s/30m');
+    // The only escape sequence allowed is the erase-line one.
+    expect(text.replace(/\x1b\[2K/g, '')).not.toContain('\x1b'); // eslint-disable-line no-control-regex
+  });
+
+  it('never lets the footer, with its ellipsis, pass the terminal width', async () => {
+    const columns = 40;
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns },
+      env: {},
+      now: () => 0,
+    });
+    const calls = ['aaaaaaaaaa', 'bbbbbbbbbb', 'cccccccccc'].map((label, i) =>
+      reporter.trackCall({ ...info, id: `c${i}`, label }, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return 'done';
+      }),
+    );
+    await Promise.all(calls);
+
+    const footers = out
+      .filter((t) => t.startsWith('\r\x1b[2K') && t.length > 4)
+      .map((t) => t.replace(/\x1b\[\d*m/g, '').replace('\r\x1b[2K', '')); // eslint-disable-line no-control-regex
+    expect(footers.length).toBeGreaterThan(0);
+    expect(footers.some((f) => f.endsWith('…'))).toBe(true);
+    for (const footer of footers) {
+      expect(footer.length).toBeLessThan(columns);
+    }
   });
 
   it('prints nothing with quiet but still writes progress.jsonl', async () => {

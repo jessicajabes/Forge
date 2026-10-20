@@ -355,6 +355,36 @@ describe('createClaudeCliRunner', () => {
       expect(idle()).toHaveLength(3);
     });
 
+    it('emits one activity event when output returns after an inactivity warning', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) });
+      const activity = () => events.filter((e) => e.type === 'activity');
+
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      expect(activity()).toEqual([]);
+
+      clock.advance(2 * MIN);
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      stdout.write('{"type":"user"}\n');
+      await new Promise((r) => setImmediate(r));
+      expect(activity()).toEqual([{ type: 'activity' }]);
+
+      stdout.end(
+        '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+      );
+      child.emit('close', 0);
+      await outcome;
+    });
+
     it('still times out at the configured limit and stops reporting inactivity', async () => {
       const clock = fakeClock();
       const { child } = hangingChild();
@@ -380,6 +410,41 @@ describe('createClaudeCliRunner', () => {
       const seen = events.length;
       clock.advance(20 * MIN);
       expect(events).toHaveLength(seen);
+    });
+
+    it('ignores the stream of a process that outlives the timeout', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        timeoutMs: 10 * MIN,
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) }).catch(
+        (e: unknown) => e,
+      );
+      clock.advance(10 * MIN);
+      expect(await outcome).toBeInstanceOf(RunnerTimeoutError);
+      const seen = events.length;
+
+      stdout.write(
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"x.ts"}}]}}\n',
+      );
+      await new Promise((r) => setImmediate(r));
+      child.emit('close', null);
+      clock.advance(30 * MIN);
+      expect(events).toHaveLength(seen);
+    });
+
+    it('exposes the limit of each mode', () => {
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        editTimeoutMs: 5 * MIN,
+      });
+      expect(runner.limitFor?.(false)).toBe(30 * MIN);
+      expect(runner.limitFor?.(true)).toBe(5 * MIN);
     });
   });
 

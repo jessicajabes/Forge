@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { logCalls, type CallRecord } from '../src/calls.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { RunnerFactory } from '../src/runner.js';
+import { labelRunner } from '../src/subagents.js';
 
 async function lines(path: string): Promise<CallRecord[]> {
   return (await readFile(path, 'utf-8'))
@@ -96,5 +98,26 @@ describe('logCalls', () => {
       make({ cwd: '/x' })({ prompt: 'p', files: [], canEdit: false }),
     ).rejects.toThrow('falhou');
     expect((await lines(path))[0]).toMatchObject({ ok: false, outputChars: 0 });
+  });
+
+  it('keeps the time limit of the runner, so the footer shows elapsed/limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-calls-'));
+    const factory: RunnerFactory = () =>
+      Object.assign(async () => 'ok', { limitFor: () => 30 * 60_000 });
+    const out: string[] = [];
+    const reporter = createProgressReporter({
+      write: async () => undefined,
+      stream: { write: (t) => out.push(t), isTTY: true, columns: 80 },
+      env: {},
+      now: () => 0,
+    });
+    const runner = labelRunner(
+      logCalls(factory, join(dir, 'calls.jsonl'))({ cwd: '/x' }),
+      reporter,
+      'dev',
+    );
+    expect(runner.limitFor?.(false)).toBe(30 * 60_000);
+    await runner({ prompt: 'p', files: [], canEdit: false });
+    expect(out.join('')).toContain('dev 0s/30m');
   });
 });

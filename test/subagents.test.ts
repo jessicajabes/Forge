@@ -190,6 +190,40 @@ describe('runSubagents labels', () => {
     expect(out.join('')).toContain('[recon · a · claude-cli/padrão do CLI]');
   });
 
+  it('passes the limit of the runner to the call, by mode', async () => {
+    const infos: { canEdit: boolean; limitMs?: number }[] = [];
+    const reporter = {
+      trackCall: async (
+        i: { canEdit: boolean; limitMs?: number },
+        run: (onEvent: () => void) => Promise<unknown>,
+      ) => {
+        infos.push(i);
+        return run(() => undefined);
+      },
+    } as unknown as ReturnType<typeof makeReporter>;
+    const runner: Runner = Object.assign(async () => 'x', {
+      limitFor: (canEdit: boolean) => (canEdit ? undefined : 1_800_000),
+    });
+    const labelled = labelRunner(runner, reporter, 'x');
+    await labelled({ prompt: 'p', files: [], canEdit: false });
+    await labelled({ prompt: 'p', files: [], canEdit: true });
+    // Labelling the labelled runner again keeps the limit and does not nest.
+    await labelRunner(
+      labelled,
+      reporter,
+      'y',
+    )({
+      prompt: 'p',
+      files: [],
+      canEdit: false,
+    });
+    expect(infos.map((i) => i.limitMs)).toEqual([
+      1_800_000,
+      undefined,
+      1_800_000,
+    ]);
+  });
+
   it('leaves the runner alone without a reporter', () => {
     const runner: Runner = async () => 'x';
     expect(labelRunner(runner, undefined, 'x')).toBe(runner);

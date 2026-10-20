@@ -289,6 +289,9 @@ export async function reviewBatch(
           [{ id: `reviewer-${label(i)}`, prompt }],
           {
             maxParallel: 1,
+            reporter: ctx.reporter,
+            origin: 'review',
+            via: { runner: cfg.runner, model: cfg.model || undefined },
           },
         );
         return { label: label(i), model: cfg.model, result: r };
@@ -306,7 +309,15 @@ export async function reviewBatch(
     const [leadResult] = await runSubagents(
       leadRunner,
       [{ id: 'lead', prompt: leadPrompt, validate: parseLead }],
-      { maxParallel: 1 },
+      {
+        maxParallel: 1,
+        reporter: ctx.reporter,
+        origin: 'review',
+        via: {
+          runner: ctx.config.steps.review.runner,
+          model: ctx.config.steps.review.model,
+        },
+      },
     );
     const verdictOk = assertAllOk(leadResult ? [leadResult] : [])[0];
     const verdict = parseLead(verdictOk?.text ?? '');
@@ -341,8 +352,13 @@ export async function reviewBatch(
     }
 
     // 3. An act_on item kept after the Dev's justification: straight to the human.
+    // A fix the Dev claimed but the reviewer found incomplete goes back to the Dev.
     const keptActOn = verdict.previous_items
-      .filter((p) => p.decision === 'maintained')
+      .filter(
+        (p) =>
+          p.decision === 'maintained' &&
+          previous?.answers[p.ref - 1]?.fixed === false,
+      )
       .map((p) => previous?.sent[p.ref - 1])
       .filter((i): i is SentItem => i !== undefined && i.bucket === 'act_on');
     const escalate = async (reason: string): Promise<never> => {

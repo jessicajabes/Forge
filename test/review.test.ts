@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config.js';
 import type { RunContext } from '../src/orchestrator.js';
+import type { ProgressEvent } from '../src/progress.js';
+import { createProgressReporter } from '../src/progressReporter.js';
 import type { Runner, RunnerFactory } from '../src/runner.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { SubagentEscalation } from '../src/subagents.js';
@@ -296,6 +298,27 @@ describe('reviewBatch', () => {
     expect(review).toContain('Motivo da escalada');
   });
 
+  it('sends an act_on item back to the Dev when the fix it claimed is kept, without escalating', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      lead({
+        act_on: [item('Outro')],
+        previous_items: [
+          {
+            ref: 1,
+            decision: 'maintained',
+            reason: 'a correção ficou pela metade',
+          },
+        ],
+      }),
+      APPROVED,
+    ]);
+    const result = await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(result.cycles).toBe(3);
+    expect(s.feedbacks).toHaveLength(2);
+    expect(s.feedbacks[1]).toContain('Sem validação'); // carried back to the Dev
+  });
+
   it('closes a consider item the Dev justified, and approves', async () => {
     const s = await setup([
       lead({ consider: [item('Nome ruim')] }),
@@ -319,6 +342,27 @@ describe('reviewBatch', () => {
     expect(s.reviewerModels.sort()).toEqual(['m-a', 'm-b']);
     expect(s.leadPrompts[0]).toContain('Reviewer A (m-a)');
     expect(s.leadPrompts[0]).toContain('Reviewer B (m-b)');
+  });
+
+  it('reports the reviewer and lead calls through the reporter', async () => {
+    const yml =
+      'steps:\n  review:\n    runner: claude-cli\n    reviewers:\n      - { runner: claude-cli, model: m-a }\n';
+    const s = await setup([APPROVED], yml);
+    const events: ProgressEvent[] = [];
+    s.ctx.reporter = createProgressReporter({
+      write: async (event) => {
+        events.push(event);
+      },
+      stream: { write: () => undefined, isTTY: false },
+      env: {},
+    });
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const starts = events.filter((e) => e.type === 'call-start');
+    expect(starts.map((e) => e.label)).toEqual([
+      'review · reviewer-A · claude-cli/m-a',
+      'review · lead · claude-cli/padrão do CLI',
+    ]);
+    expect(events.filter((e) => e.type === 'call-end')).toHaveLength(2);
   });
 
   it('escalates when the lead answers badly three times', async () => {
