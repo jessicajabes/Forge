@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
 import { ArenaEscalation } from './arena.js';
+import { logCalls } from './calls.js';
+import { join } from 'node:path';
 import { SubagentEscalation } from './subagents.js';
 import { loadConfig, type Config } from './config.js';
 import type { IO } from './io.js';
@@ -244,7 +246,10 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       run = await createRun(cwd, task);
     }
 
-    const make = deps.makeRunner(config);
+    const make = logCalls(
+      deps.makeRunner(config),
+      join(run.dir, 'calls.jsonl'),
+    );
     const ctx: RunContext = {
       cwd,
       task,

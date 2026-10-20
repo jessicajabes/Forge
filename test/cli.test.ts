@@ -161,6 +161,23 @@ describe('forge-jj', () => {
     expect(io.output()).toContain('Custo estimado do Dev (Dev simples)');
   });
 
+  it('logs every model call of the run in calls.jsonl', async () => {
+    const { d, cwd, s } = await deps(['aprovar']);
+    await main(
+      ['corrigir o typo', '--size', 'trivial', '--review', 'final'],
+      d,
+    );
+    const { readdir } = await import('node:fs/promises');
+    const [runId] = await readdir(join(cwd, '.workflow', 'runs'));
+    const log = await readFile(
+      join(cwd, '.workflow', 'runs', runId ?? '', 'calls.jsonl'),
+      'utf-8',
+    );
+    expect(log.split('\n').filter((l) => l.length > 0)).toHaveLength(
+      s.calls.length,
+    );
+  });
+
   it('flags skip the questions; without flags Enter takes the defaults', async () => {
     const withFlags = await deps(['aprovar']);
     await main(['x', '--size', 'trivial', '--review', 'final'], withFlags.d);
