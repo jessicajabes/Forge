@@ -1,5 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { summarizeToolArg } from '../progress.js';
+import {
+  INACTIVITY_MS,
+  INACTIVITY_REPEAT_MS,
+  summarizeToolArg,
+} from '../progress.js';
 import {
   RunnerError,
   RunnerTimeoutError,
@@ -17,6 +21,25 @@ export class ClaudeCliError extends RunnerError {
     this.name = 'ClaudeCliError';
   }
 }
+
+/** Timers of a call. Each `set*` returns the function that cancels it. Tests inject a fake. */
+export type Clock = {
+  setTimeout: (fn: () => void, ms: number) => () => void;
+  setInterval: (fn: () => void, ms: number) => () => void;
+  now: () => number;
+};
+
+const realClock: Clock = {
+  setTimeout: (fn, ms) => {
+    const t = setTimeout(fn, ms);
+    return () => clearTimeout(t);
+  },
+  setInterval: (fn, ms) => {
+    const t = setInterval(fn, ms);
+    return () => clearInterval(t);
+  },
+  now: () => Date.now(),
+};
 
 export type ClaudeCliOptions = {
   /** Working directory of the `claude` process (the target repo, or a worktree). */
@@ -36,6 +59,8 @@ export type ClaudeCliOptions = {
   editTimeoutMs?: number;
   /** Called once if ANTHROPIC_API_KEY would replace the login (DESIGN 4.5). */
   notice?: (message: string) => void;
+  /** Timers and time source. Default: the real ones. */
+  clock?: Clock;
   /** Starts the process. Tests replace it; the default runs the real `claude`. */
   spawnFn?: (
     cmd: string,
@@ -186,6 +211,8 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         stdio: ['pipe', 'pipe', 'pipe'],
       }));
 
+  const clock = opts.clock ?? realClock;
+
   return (req) =>
     new Promise<string>((resolve, reject) => {
       const { args, env, stdin } = buildInvocation(req, opts);
@@ -197,13 +224,36 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         if (!req.onEvent) return;
         for (const e of parseStreamEvents(line)) req.onEvent(e);
       };
+      let lastEventAt = clock.now();
+      let cancelWatch = () => {};
+      // Restarts the wait: no stream line for 2 minutes, then again every 5.
+      const watch = () => {
+        cancelWatch();
+        if (!req.onEvent) return;
+        const report = () =>
+          req.onEvent?.({
+            type: 'inactivity',
+            idleMs: clock.now() - lastEventAt,
+          });
+        let cancelRepeat = () => {};
+        const cancelFirst = clock.setTimeout(() => {
+          report();
+          cancelRepeat = clock.setInterval(report, INACTIVITY_REPEAT_MS);
+        }, INACTIVITY_MS);
+        cancelWatch = () => {
+          cancelFirst();
+          cancelRepeat();
+        };
+      };
+      watch();
       const limit = req.canEdit
         ? opts.editTimeoutMs
         : (opts.timeoutMs ?? 30 * 60_000);
-      const timer =
+      const cancelTimer =
         limit === undefined
-          ? undefined
-          : setTimeout(() => {
+          ? () => {}
+          : clock.setTimeout(() => {
+              cancelWatch();
               child.kill('SIGTERM');
               reject(
                 new RunnerTimeoutError(
@@ -221,11 +271,16 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         pending += text;
         const lines = pending.split('\n');
         pending = lines.pop() ?? '';
+        if (lines.some((l) => l.trim())) {
+          lastEventAt = clock.now();
+          watch();
+        }
         lines.forEach(emit);
       });
       child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
       child.on('error', (error) => {
-        clearTimeout(timer);
+        cancelTimer();
+        cancelWatch();
         reject(
           new ClaudeCliError(
             `não foi possível rodar o claude: ${error.message}`,
@@ -233,7 +288,8 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         );
       });
       child.on('close', (code) => {
-        clearTimeout(timer);
+        cancelTimer();
+        cancelWatch();
         emit(pending);
         pending = '';
         try {

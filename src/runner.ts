@@ -1,7 +1,8 @@
 /** What a runner may report while it works, when the provider exposes it. */
 export type RunnerEvent =
   | { type: 'model'; model: string }
-  | { type: 'tool'; name: string; arg: string };
+  | { type: 'tool'; name: string; arg: string }
+  | { type: 'inactivity'; idleMs: number };
 
 /** A failed runner call. Carries the CLI's full stderr and exit code for the reporter. */
 export class RunnerError extends Error {

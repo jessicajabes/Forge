@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { RunnerTimeoutError } from '../../src/runner.js';
+import { RunnerTimeoutError, type RunnerEvent } from '../../src/runner.js';
 import {
   ClaudeCliError,
   buildInvocation,
@@ -265,6 +265,122 @@ describe('createClaudeCliRunner', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('with a fake clock', () => {
+    const MIN = 60_000;
+
+    function fakeClock() {
+      let now = 0;
+      let nextId = 0;
+      const timers = new Map<
+        number,
+        { at: number; fn: () => void; every?: number }
+      >();
+      const add = (fn: () => void, ms: number, every?: number) => {
+        const id = nextId++;
+        timers.set(id, { at: now + ms, fn, every });
+        return () => void timers.delete(id);
+      };
+      return {
+        setTimeout: (fn: () => void, ms: number) => add(fn, ms),
+        setInterval: (fn: () => void, ms: number) => add(fn, ms, ms),
+        now: () => now,
+        advance(ms: number) {
+          const target = now + ms;
+          for (;;) {
+            const due = [...timers.entries()]
+              .filter(([, t]) => t.at <= target)
+              .sort((a, b) => a[1].at - b[1].at)[0];
+            if (!due) break;
+            const [id, t] = due;
+            now = t.at;
+            if (t.every === undefined) timers.delete(id);
+            else t.at += t.every;
+            t.fn();
+          }
+          now = target;
+        },
+      };
+    }
+
+    function hangingChild() {
+      const child = new EventEmitter() as ChildProcess;
+      const stdout = new PassThrough();
+      Object.assign(child, {
+        stdout,
+        stderr: new PassThrough(),
+        stdin: new PassThrough(),
+        kill: () => true,
+      });
+      return { child, stdout };
+    }
+
+    it('reports inactivity at 2 minutes, repeats every 5 and resets on a new stream line', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) });
+      const idle = () => events.filter((e) => e.type === 'inactivity');
+
+      clock.advance(2 * MIN - 1);
+      expect(idle()).toEqual([]);
+      clock.advance(1);
+      expect(idle()).toEqual([{ type: 'inactivity', idleMs: 2 * MIN }]);
+      clock.advance(5 * MIN);
+      expect(idle()).toEqual([
+        { type: 'inactivity', idleMs: 2 * MIN },
+        { type: 'inactivity', idleMs: 7 * MIN },
+      ]);
+
+      stdout.write('{"type":"system","subtype":"hook"}\n');
+      await new Promise((r) => setImmediate(r));
+      clock.advance(2 * MIN - 1);
+      expect(idle()).toHaveLength(2);
+      clock.advance(1);
+      expect(idle()).toHaveLength(3);
+      expect(idle()[2]).toEqual({ type: 'inactivity', idleMs: 2 * MIN });
+
+      stdout.end(
+        '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+      );
+      child.emit('close', 0);
+      expect(await outcome).toBe('oi');
+      clock.advance(30 * MIN);
+      expect(idle()).toHaveLength(3);
+    });
+
+    it('still times out at the configured limit and stops reporting inactivity', async () => {
+      const clock = fakeClock();
+      const { child } = hangingChild();
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        timeoutMs: 10 * MIN,
+        clock,
+        spawnFn: () => child,
+      });
+      const events: RunnerEvent[] = [];
+      const outcome = runner({ ...read, onEvent: (e) => events.push(e) }).catch(
+        (e: unknown) => e,
+      );
+      clock.advance(10 * MIN - 1);
+      let settled = false;
+      void outcome.then(() => (settled = true));
+      await new Promise((r) => setImmediate(r));
+      expect(settled).toBe(false);
+      clock.advance(1);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(RunnerTimeoutError);
+      expect((error as RunnerTimeoutError).limitMs).toBe(10 * MIN);
+      const seen = events.length;
+      clock.advance(20 * MIN);
+      expect(events).toHaveLength(seen);
+    });
   });
 
   it('rejects when the process fails', async () => {
