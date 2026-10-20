@@ -146,6 +146,7 @@ subagents:
   max_parallel: 3         # subagentes simultâneos (ver 4.13)
 dev:
   allowed_commands: [npm test, npm run lint, npx prettier]
+  # check_commands: [npm test, npm run lint]   # o que o arena roda para verificar o resultado (ver 4.14)
   # batching: per_task   # opcional: um Dev por tarefa mesmo com review_mode: final (ver 4.7)
   # max_turns: 200       # opcional: sem limite se não preenchido
   # timeout_minutes: 120 # opcional: sem limite se não preenchido
@@ -265,7 +266,7 @@ Fluxo de um lote:
 2. **Candidatos.** O código cria N worktrees de git a partir do commit atual, em `.workflow/runs/<data>-<slug>/arena/<lote>/candidato-<n>/`, e roda o runner do Dev (`claude-cli`, ver 4.6) em cada um (`cwd` no worktree), em paralelo até `subagents.max_parallel`. Cada candidato entrega as mudanças e uma justificativa curta com as alternativas consideradas e rejeitadas.
 3. **Juiz.** Quando todos terminam, um subagente somente leitura (4.13), de modelo `dev.arena.judge` (`claude-cli` ou `copilot-cli`, de preferência de outra família que a do Dev), vê a rubrica e o diff de cada candidato, pontua critério a critério e recomenda uma base.
 4. **Base e enxerto.** Um agente de Dev com permissão de edição, no projeto real, lê todos os candidatos, pontua pela rubrica, compara com o juiz e escolhe a base que um mantenedor consegue estender com menos risco (em empate, a fronteira mais limpa ou a API menor). Depois enxerta à mão uma ou duas coisas de cada perdedor, sem colar mecanicamente. Se os candidatos convergem na mesma forma, vence o consenso, sem enxerto.
-5. **Verificar.** Roda `dev.allowed_commands` (testes, lint, prettier) no resultado e segue para a Revisão normal do lote.
+5. **Verificar.** Remove os worktrees e então roda `dev.check_commands` (padrão: `npm test` e `npm run lint`) no resultado, e segue para a Revisão normal do lote. Os worktrees saem antes porque ficam dentro do projeto: com eles ali, o lint e os testes leriam todas as cópias do código. A lista é separada de `dev.allowed_commands`, que diz o que um candidato pode rodar e pode ter formatadores que escrevem (`npx prettier`), sem sentido como verificação. O resultado só é registrado no `arena.md`, não bloqueia; quem decide é a Revisão.
 6. **Nota.** `arena/<lote>/arena.md` (na pasta da execução) registra a base e o motivo, o veredito do juiz, cada enxerto e sua origem, o que foi rejeitado, convergência ou desistências e o resultado da verificação. Os worktrees são removidos ao fim; `.workflow/` inteiro fica fora do git do projeto-alvo (3.3).
 
 Casos de borda:

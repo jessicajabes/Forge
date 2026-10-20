@@ -142,6 +142,13 @@ export async function runArena(
     .join('\n\n');
   const allowed = safeCommands(ctx.config.dev.allowed_commands);
   const worktrees: string[] = [];
+  // Idempotent: it runs before the checks and again in `finally`, which also covers failures
+  const removeWorktrees = async () => {
+    for (const dir of worktrees.splice(0)) {
+      await removeWorktree(ctx.cwd, dir);
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
 
   try {
     // 1. Rubric: derived before any candidate starts, never shown to them.
@@ -314,8 +321,10 @@ export async function runArena(
         /## Arena note[\s\S]*$/.exec(integrated)?.[0] ?? integrated.trim();
     }
 
-    // 5. Verify the result with the project's own commands.
-    const checks = await runChecks(ctx.cwd, allowed);
+    // 5. Verify the result with the project's own commands. The worktrees go first: they
+    // sit inside the project, so lint and the tests would read every copy of the code.
+    await removeWorktrees();
+    const checks = await runChecks(ctx.cwd, ctx.config.dev.check_commands);
     const checksText =
       checks.length === 0
         ? 'nenhum comando para verificar'
@@ -344,9 +353,6 @@ ${checksText}
     return { note };
   } finally {
     // The worktrees always go, even when the arena fails or escalates.
-    for (const dir of worktrees) {
-      await removeWorktree(ctx.cwd, dir);
-      await rm(dir, { recursive: true, force: true });
-    }
+    await removeWorktrees();
   }
 }

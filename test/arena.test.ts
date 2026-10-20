@@ -83,7 +83,8 @@ async function setup(opts: Opts = {}) {
     };
   };
   const config = parseConfig(
-    opts.yml ?? 'dev:\n  allowed_commands: [node --version]\n',
+    opts.yml ??
+      'dev:\n  allowed_commands: [node --version]\n  check_commands: [node --version]\n',
   );
   const ctx: RunContext = {
     cwd,
@@ -299,6 +300,30 @@ describe('arena models', () => {
       expect(call.model).toBe('m-dev');
       expect(call.runner).toBe('claude-cli');
     }
+  });
+});
+
+describe('arena checks', () => {
+  it('run the check_commands, not the allowed_commands, after the worktrees are gone', async () => {
+    const probe = (dir: string) => `test ! -e ${dir}`;
+    const s = await setup({
+      yml: 'dev:\n  allowed_commands: [node --version]\n  check_commands: [node --version]\n',
+    });
+    // A check that passes only when the first worktree no longer exists
+    s.ctx.config.dev.check_commands = [
+      probe(join(s.arenaDir, 'candidato-1')),
+      'node --version',
+    ];
+    await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
+    expect(note).toContain('candidato-1`: passou');
+    expect(note).toContain('`node --version`: passou');
+  });
+
+  it('default to npm test and npm run lint, without the formatter of allowed_commands', () => {
+    const dev = parseConfig('').dev;
+    expect(dev.check_commands).toEqual(['npm test', 'npm run lint']);
+    expect(dev.allowed_commands).toContain('npx prettier');
   });
 });
 

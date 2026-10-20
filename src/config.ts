@@ -71,6 +71,11 @@ const configSchema = z
         allowed_commands: z
           .array(z.string())
           .default(['npm test', 'npm run lint', 'npx prettier']),
+        // What the arena runs to check the result. Not the same as `allowed_commands`:
+        // those are what a candidate may run, and may include formatters that write
+        check_commands: z
+          .array(z.string())
+          .default(['npm test', 'npm run lint']),
         // Not set: follows `review_mode` (one batch per task when the review is per task)
         batching: z.enum(['per_task', 'all']).optional(),
         // Editing calls have no limit unless these are set
@@ -88,6 +93,7 @@ const configSchema = z
       .strict()
       .default({
         allowed_commands: ['npm test', 'npm run lint', 'npx prettier'],
+        check_commands: ['npm test', 'npm run lint'],
         arena: { candidates: 3 },
       }),
     claude: z
