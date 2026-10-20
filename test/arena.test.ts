@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -300,6 +300,29 @@ describe('arena models', () => {
       expect(call.model).toBe('m-dev');
       expect(call.runner).toBe('claude-cli');
     }
+  });
+});
+
+describe('arena after an interrupted run', () => {
+  it('replaces the worktrees and folders left behind instead of dropping the candidates', async () => {
+    const s = await setup();
+    await mkdir(s.arenaDir, { recursive: true });
+    // one worktree still registered with git, one plain folder with a file in it
+    await git(s.ctx.cwd, [
+      'worktree',
+      'add',
+      '--detach',
+      '-q',
+      join(s.arenaDir, 'candidato-1'),
+      'HEAD',
+    ]);
+    await mkdir(join(s.arenaDir, 'candidato-2'));
+    await writeFile(join(s.arenaDir, 'candidato-2', 'sobra.txt'), 'x');
+
+    await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
+    expect(note).toContain('Iniciados: 3. Entregaram: 3.');
+    expect(existsSync(join(s.arenaDir, 'candidato-2'))).toBe(false);
   });
 });
 

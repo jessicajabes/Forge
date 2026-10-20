@@ -199,6 +199,9 @@ export async function runArena(
           cfg.models?.[(index - 1) % (cfg.models?.length || 1)] ??
           ctx.config.steps.dev.model;
         try {
+          // A run that was interrupted leaves its worktrees behind, and `git worktree add` refuses a path that exists
+          await removeWorktree(ctx.cwd, dir);
+          await rm(dir, { recursive: true, force: true });
           await addWorktree(ctx.cwd, dir);
           worktrees.push(dir);
           const runner = deps.makeRunner({
