@@ -106,3 +106,20 @@ describe('runs', () => {
     expect(a.dir).not.toBe(b.dir);
   });
 });
+
+describe('preflight when resuming', () => {
+  it('accepts a dirty tree only with allowDirty', async () => {
+    const cwd = await makeRepo();
+    await writeFile(join(cwd, 'wip.txt'), 'trabalho em andamento');
+    expect(await codeOf(preflight({ cwd, isTTY: true }))).toBe('dirty-tree');
+    const result = await preflight({ cwd, isTTY: true, allowDirty: true });
+    await result.release();
+  });
+
+  it('still refuses main and master when resuming', async () => {
+    const cwd = await makeRepo('main');
+    expect(
+      await codeOf(preflight({ cwd, isTTY: true, allowDirty: true })),
+    ).toBe('protected-branch');
+  });
+});

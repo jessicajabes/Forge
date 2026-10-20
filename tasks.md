@@ -243,11 +243,11 @@ Backlog de construção do próprio Forge, escrito com a skill `tasks` a partir 
 - **Arquivos**: `src/index.ts` (novo), `package.json`, `test/cli.test.ts` (novo)
 - **O que fazer**: Expor o comando `forge-jj "<tarefa>"` com as perguntas de tamanho e de modo de revisão (Enter escolhe o padrão) e as flags `--size`, `--review per_task`, `--no-arena`, `--arena <n>` e `--refresh-context` (3.2). Ligar o `preflight`, o orquestrador e os runners.
 - **Critério de aceite**:
-  - [ ] `npm test` passa, com teste que confirma que as flags pulam as perguntas e que Enter escolhe os padrões
-  - [ ] `npm link` e `forge-jj --help` funcionam
-  - [ ] Sem TTY, o comando recusa com uma linha
-  - [ ] `npm run typecheck` sem erros
-  - [ ] `npm run lint` sem erros
+  - [x] `npm test` passa, com teste que confirma que as flags pulam as perguntas e que Enter escolhe os padrões
+  - [x] `npm link` e `forge-jj --help` funcionam
+  - [x] Sem TTY, o comando recusa com uma linha
+  - [x] `npm run typecheck` sem erros
+  - [x] `npm run lint` sem erros
 - **Depende de**: T10, T11, T12, T14, T15, T17, T19, T20, T21, T23, T24
 
 ## T26: README

@@ -31,6 +31,8 @@ const PROTECTED_BRANCHES = ['main', 'master'];
 export async function preflight(opts: {
   cwd: string;
   isTTY: boolean;
+  /** A resumed run may have uncommitted work from the interrupted batch. */
+  allowDirty?: boolean;
 }): Promise<PreflightResult> {
   const { cwd, isTTY } = opts;
   if (!isTTY) {
@@ -46,7 +48,7 @@ export async function preflight(opts: {
     );
   }
   const excluded = await ensureLocalExclude(cwd);
-  if (!(await isClean(cwd))) {
+  if (!opts.allowDirty && !(await isClean(cwd))) {
     throw new PreflightError(
       'dirty-tree',
       'há alterações não commitadas: faça commit ou `git stash` antes de continuar.',

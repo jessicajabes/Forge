@@ -13,11 +13,34 @@ export function createReadlineIO(
   output: NodeJS.WritableStream = process.stdout,
 ): IO {
   const rl = createInterface({ input, output });
+  let closed = false;
+  let rejectPending: ((error: Error) => void) | null = null;
+  // Ctrl+C and Ctrl+D close the interface: a question waiting for an answer must fail,
+  // not hang, so the stage can save its draft (DESIGN 4.8).
+  rl.on('close', () => {
+    closed = true;
+    rejectPending?.(new Error('entrada encerrada (Ctrl+C ou Ctrl+D)'));
+  });
   return {
     write: (text) => {
       output.write(text.endsWith('\n') ? text : `${text}\n`);
     },
-    ask: (question) => rl.question(question),
+    ask: (question) =>
+      new Promise<string>((resolve, reject) => {
+        if (closed)
+          return reject(new Error('entrada encerrada (Ctrl+C ou Ctrl+D)'));
+        rejectPending = reject;
+        rl.question(question).then(
+          (answer) => {
+            rejectPending = null;
+            resolve(answer);
+          },
+          (error: unknown) => {
+            rejectPending = null;
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
+      }),
     close: () => rl.close(),
   };
 }
