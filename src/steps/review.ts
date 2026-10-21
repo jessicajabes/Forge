@@ -1,3 +1,4 @@
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { parseSpec, saveArtifact, type Task } from '../artifacts.js';
@@ -92,7 +93,7 @@ export function parseDevAnswers(report: string, count: number): DevAnswer[] {
 // ---------- the loop ----------
 
 type SentItem = Item & { bucket: 'act_on' | 'consider' };
-type Cycle = {
+export type Cycle = {
   number: number;
   verdict: 'approved' | 'rejected';
   sent: SentItem[];
@@ -121,6 +122,9 @@ export type ReviewDeps = {
   skillsDir?: string;
 };
 
+/** `rejected` describes a cycle that went back to the Dev: nothing is left for a person yet. */
+export type ReviewStatus = 'approved' | 'rejected' | 'escalated';
+
 const label = (i: number) => String.fromCharCode(65 + i);
 const line = (i: Item) =>
   `${i.task ? `[${i.task}] ` : ''}${i.title}: ${i.description}`;
@@ -128,9 +132,10 @@ const line = (i: Item) =>
 /** The items nobody can settle but a person: what the run escalated, or approved at the cycle limit. */
 function humanItems(
   cycles: Cycle[],
-  status: 'approved' | 'escalated',
+  status: ReviewStatus,
   leftover: Item[],
 ): Item[] {
+  if (status === 'rejected') return [];
   return status === 'escalated' ? (cycles.at(-1)?.sent ?? []) : leftover;
 }
 
@@ -140,11 +145,12 @@ const NO_HUMAN = '## ✅ Nada depende de ação humana';
 /** The red block: what needs a person, why, and what the person does about it. */
 function renderHuman(
   items: Item[],
-  status: 'approved' | 'escalated',
+  status: ReviewStatus,
   reason?: string,
   heading = HUMAN_TITLE,
 ): string {
-  if (status === 'approved' && items.length === 0) return `${NO_HUMAN}\n`;
+  if (status === 'rejected' || (status === 'approved' && items.length === 0))
+    return `${NO_HUMAN}\n`;
   const todo =
     status === 'escalated'
       ? 'Decida: corrigir o item à mão ou aceitá-lo. Depois retome a execução.'
@@ -161,14 +167,20 @@ ${items.map((i, n) => `${n + 1}. 🔴 ${line(i)}`).join('\n')}
 `;
 }
 
-function renderReview(
+export function renderReview(
   cycles: Cycle[],
-  status: 'approved' | 'escalated',
+  status: ReviewStatus,
   max: number,
   reason?: string,
   /** `consider` items still open when the cycle limit approved the batch. */
   leftover: Item[] = [],
+  /** Cycle files already on disk from earlier attempts; cycle numbers continue after them. */
+  fileOffset = 0,
 ): string {
+  const range =
+    fileOffset > 0
+      ? ` nesta tentativa (ciclos ${fileOffset + 1} a ${fileOffset + cycles.length} do lote)`
+      : '';
   const atLimit =
     leftover.length > 0
       ? `\n- **Aprovado no limite de ciclos**: ${leftover.length} ${leftover.length === 1 ? 'item' : 'itens'} \`consider\` ficaram em aberto e foram anotados, sem voltar ao Dev: ${leftover.map((i) => i.title).join('; ')}`
@@ -181,8 +193,8 @@ function renderReview(
   const head = `# Revisão
 
 ## Resumo
-- **Veredito**: ${status === 'approved' ? 'aprovado' : '🔴 escalado ao humano'}
-- **Ciclos realizados**: ${cycles.length} de ${max}${atLimit}${reason ? `\n- **Motivo da escalada**: ${reason}` : ''}
+- **Veredito**: ${status === 'approved' ? 'aprovado' : status === 'rejected' ? 'reprovado' : '🔴 escalado ao humano'}
+- **Ciclos realizados**: ${cycles.length} de ${max}${range}${atLimit}${reason ? `\n- **Motivo da escalada**: ${reason}` : ''}
 - **Depende de ação humana**: ${human.startsWith(HUMAN_TITLE) ? '🔴 SIM, veja o bloco abaixo' : 'não'}
 
 ${human}`;
@@ -282,7 +294,7 @@ function itemTaskId(item: Item): number | null {
  */
 function renderTaskReviews(
   cycles: Cycle[],
-  status: 'approved' | 'escalated',
+  status: ReviewStatus,
   reason: string | undefined,
   leftover: Item[],
   only: Task | undefined,
@@ -418,15 +430,41 @@ export async function reviewBatch(
   });
 
   const cycles: Cycle[] = [];
+  // A resumed batch numbers its cycle files after the ones already on disk, so none is overwritten.
+  const cyclePattern = new RegExp(
+    `^review-lote-${batch.index}-ciclo-(\\d+)\\.md$`,
+  );
+  const fileOffset = Math.max(
+    0,
+    ...(await readdir(ctx.run.dir)).map((f) =>
+      Number(cyclePattern.exec(f)?.[1] ?? 0),
+    ),
+  );
+  /** Saves `review-lote-N-ciclo-K.md`: the cycles up to the last one, so a rejected cycle leaves a record. */
+  const saveCycle = async (
+    status: ReviewStatus,
+    reason?: string,
+    leftover: Item[] = [],
+  ) => {
+    await saveArtifact(
+      join(
+        ctx.run.dir,
+        `review-lote-${batch.index}-ciclo-${fileOffset + cycles.length}.md`,
+      ),
+      renderReview(cycles, status, max, reason, leftover, fileOffset),
+      () => undefined,
+    );
+  };
   /** Saves the batch report and, beside it, one review document per task. */
   const persist = async (
     status: 'approved' | 'escalated',
     reason?: string,
     leftover: Item[] = [],
   ) => {
+    await saveCycle(status, reason, leftover);
     await saveArtifact(
       reviewPath,
-      renderReview(cycles, status, max, reason, leftover),
+      renderReview(cycles, status, max, reason, leftover, fileOffset),
       () => undefined,
     );
     const docs = renderTaskReviews(
@@ -543,7 +581,7 @@ export async function reviewBatch(
       ...verdict.consider.map((i) => ({ ...i, bucket: 'consider' as const })),
     ];
     const cycle: Cycle = {
-      number,
+      number: fileOffset + number,
       verdict: computed,
       sent,
       answers: [],
@@ -609,6 +647,8 @@ export async function reviewBatch(
       );
     const toDev = [...sent, ...carried];
     cycle.sent = toDev;
+    // Keeps the cycle on disk in case the Dev fails.
+    await saveCycle('rejected');
     const feedbackFor = (items: SentItem[]) =>
       `${items.map((s, i) => `${i + 1}. ${line(s)}${s.suggestion ? ` (suggestion: ${s.suggestion})` : ''}`).join('\n')}
 
@@ -635,6 +675,7 @@ Answer every item at the end of your report, one line each: \`N. Corrigido: <wha
       });
     }
     cycle.answers = answers;
+    await saveCycle('rejected');
     previous = { sent: toDev, answers: cycle.answers };
   }
   throw new ReviewEscalation('revisão sem ciclos disponíveis', reviewPath);

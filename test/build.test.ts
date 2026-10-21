@@ -528,6 +528,62 @@ describe('build stage in the single-Dev flow', () => {
     expect(io.output()).toContain('a revisão já tinha sido aprovada');
   }, 30_000);
 
+  it('resumes a batch approved after a rejected cycle without reviewing it again', async () => {
+    const s = await setup('review_mode: final');
+    const calls: string[] = [];
+    let leads = 0;
+    const makeRunner: RunnerFactory = () => async (req) => {
+      calls.push(req.prompt.slice(0, 20));
+      if (req.prompt.includes('adversarial code reviewer'))
+        return '## Findings\n\nachado';
+      if (req.canEdit) {
+        await writeFile(join(s.ctx.cwd, 'fix.txt'), 'x');
+        return '1. Corrigido: ok';
+      }
+      return leads++ === 0
+        ? JSON.stringify({
+            verdict: 'rejected',
+            act_on: [
+              {
+                task: 'T1',
+                title: 'Falta algo',
+                description: 'falta algo',
+                raised_by: ['A'],
+              },
+            ],
+          })
+        : APPROVED;
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx);
+    const dir = s.ctx.run.dir;
+    const cycle1 = await readFile(
+      join(dir, 'review-lote-1-ciclo-1.md'),
+      'utf8',
+    );
+    expect(cycle1).toContain('**Veredito**: reprovado');
+    expect(await readFile(join(dir, 'review-lote-1.md'), 'utf8')).toContain(
+      '**Veredito**: aprovado',
+    );
+    // review.md joins review-lote-N.md only, never the per-cycle files
+    const review = await readFile(join(dir, 'review.md'), 'utf8');
+    expect(review).not.toContain('**Veredito**: reprovado');
+
+    const first = calls.length;
+    // as if the run stopped right before the commit, with no record in build.json
+    const statePath = join(dir, 'build.json');
+    const state = JSON.parse(await readFile(statePath, 'utf8'));
+    await writeFile(
+      statePath,
+      JSON.stringify({ ...state, reviewedBatches: [] }),
+    );
+    await git(s.ctx.cwd, ['reset', '--soft', 'HEAD~1']);
+    await git(s.ctx.cwd, ['reset']);
+    const io = createFakeIO([]);
+    await createBuildStage({ io, makeRunner })(s.ctx);
+    expect(calls.length).toBe(first);
+    expect(io.output()).toContain('a revisão já tinha sido aprovada');
+  }, 30_000);
+
   it('reviews the Dev fix of a check that failed after the review changed code', async () => {
     const s = await setup('review_mode: final');
     await writeFile(

@@ -15,7 +15,9 @@ import {
   computeVerdict,
   parseDevAnswers,
   parseLead,
+  renderReview,
   reviewBatch,
+  type Cycle,
 } from '../src/steps/review.js';
 import { parseTasks } from '../src/artifacts.js';
 import { createFakeIO } from './fakeIO.js';
@@ -510,6 +512,102 @@ describe('review diff', () => {
     expect(t.feedbacks[0]).toContain('1. [T1] A');
     expect(t.feedbacks[0]).toContain('2. [T1] C');
     expect(t.feedbacks[1]).toContain('1. [T2] B');
+  });
+});
+
+describe('renderReview', () => {
+  it('renders a rejected cycle as reprovado with no human block', () => {
+    const cycle: Cycle = {
+      number: 1,
+      verdict: 'rejected',
+      sent: [{ ...item('Sem validação'), bucket: 'act_on' }],
+      answers: [{ fixed: true, text: 'ok' }],
+      noted: [],
+      dismissed: [],
+      previous: [],
+      models: {},
+    };
+    const text = renderReview([cycle], 'rejected', 10);
+    expect(text).toContain('- **Veredito**: reprovado');
+    expect(text).toContain('- **Depende de ação humana**: não');
+    expect(text).not.toContain('🔴');
+    expect(text).toContain('## Ciclo 1: reprovado');
+  });
+});
+
+describe('review document per cycle', () => {
+  it('writes one document per cycle, rejected ones included', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const first = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md'),
+      'utf8',
+    );
+    expect(first).toContain('reprovado');
+    expect(first).toContain('1. Corrigido: ok');
+    const second = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(second).toContain('aprovado');
+  });
+
+  it('does not overwrite the cycle documents when the batch is resumed', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    const failing = async () => {
+      throw new Error('sem atividade');
+    };
+    await expect(reviewBatch(s.ctx, s.batch, s.deps, failing)).rejects.toThrow(
+      'sem atividade',
+    );
+    const file = join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md');
+    const original = await readFile(file, 'utf8');
+    expect(original).toContain('reprovado');
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(await readFile(file, 'utf8')).toBe(original);
+    const resumed = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(resumed).toContain('## Ciclo 2');
+    expect(resumed).toContain(
+      '- **Ciclos realizados**: 1 de 10 nesta tentativa (ciclos 2 a 2 do lote)',
+    );
+    expect(resumed).toContain('reprovado');
+  });
+
+  it('keeps review-lote-N.md as the approved verdict only', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(await readFile(s.reviewPath, 'utf8')).toContain(
+      '**Veredito**: aprovado',
+    );
+    expect(
+      await readFile(join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md'), 'utf8'),
+    ).not.toContain('**Veredito**: aprovado');
+  });
+
+  it('writes the document of the escalated cycle before throwing', async () => {
+    const still = lead({ act_on: [item('Aberto')] });
+    const s = await setup([still, still], 'max_review_cycles: 2');
+    await expect(
+      reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
+    ).rejects.toBeInstanceOf(ReviewEscalation);
+    const last = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(last).toContain('escalado ao humano');
   });
 });
 
