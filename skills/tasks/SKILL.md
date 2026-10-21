@@ -65,19 +65,20 @@ Do not split into tiny tasks either. The Dev may run each task as its own batch 
 
 The Forge may commit and review after any single task. So every task must:
 
-- leave the project in a working state: it builds, and the existing tests pass;
+- leave the project working: it builds (or passes a cheap typecheck, when the project has one) and its own targeted tests pass. Only the full suite, lint and format are global checks left out of the tasks;
 - be checkable on its own, without waiting for a later task;
 - depend only on earlier tasks, never on a later one.
 
-Put the riskiest or least certain task early, so a wrong assumption fails fast. Every 2 or 3 tasks, make sure the last task of the group ends in a check of the whole flow so far (full test run, build, or an end-to-end behavior), not only its own change.
+Put the riskiest or least certain task early, so a wrong assumption fails fast. Every 2 or 3 tasks, make sure the last task of the group ends in a criterion that shows the whole flow so far working (build, typecheck, or an end-to-end behavior), not only its own change.
 
 ### 5. Write the acceptance criteria
 
-Every criterion must be checkable by a command or an observable behavior: a test that passes, a clean lint, a response a person can see. "Works well" and "is clean" are not criteria.
+Every criterion must be checkable by a command or an observable behavior: a targeted test that passes, a response a person can see. "Works well" and "is clean" are not criteria.
 
-- Use only commands found in `context.md` or in the repo. Never invent a command. If the project has no test command, say so in the task, and write the criterion as an observable behavior.
-- Every task that changes behavior includes a criterion for a new or updated test.
-- Every task includes the project's lint or format check when `context.md` lists one.
+- Use only commands found in `context.md` or in the repo. Never invent a command. If the project has no way to check the behavior, say so in the task, and write the criterion as an observable behavior.
+- Each task carries only the criteria for its own behavior. A task that changes behavior includes a criterion for the new or updated test of that behavior.
+- A test criterion runs only the task's own test file or filter (for example `npm test -- <path>`), using a command that is in `dev.allowed_commands`. If no allowed command can run a single file, say so under `## Dúvidas` instead of requiring the full suite.
+- Do not add formatting (`prettier`), full test-suite, or lint criteria to any task. They are global checks, not part of a task's own behavior, and are left out of `tasks.md`. This applies to both `per_task` and final review modes.
 
 ## Output format
 
@@ -90,8 +91,8 @@ Answer with this structure, in the language the spec is written in. Keep the hea
 - **Arquivos**: src/..., src/...
 - **O que fazer**: <one short paragraph: what to change and why, not a line-by-line recipe>
 - **Critério de aceite**:
-  - [ ] `<test command>` passes, with a new test for ...
-  - [ ] `<lint command>` has no errors
+  - [ ] `<command or observable behavior>` shows ...
+  - [ ] A new test for ... passes
 - **Depende de**: nenhuma
 ```
 
@@ -119,12 +120,14 @@ Rules for the format:
 | "Implement the feature" with no criteria | Add checks a command can verify. |
 | A task that only passes once a later task exists | Reorder, or merge the two. |
 | A command in a criterion that is not in the repo | Read `context.md`; use only real commands. |
+| Prettier, lint, or a full test run in every task | Leave them out. They are global checks, not part of a task. Use only a targeted test for the task's own behavior. |
 | One huge task to save batches | Split it by the rules in step 3. |
 
 ## Check before you answer
 
 - [ ] Every task has at least one checkable acceptance criterion.
 - [ ] Every command in a criterion exists in `context.md` or the repo.
+- [ ] No task has a prettier, lint, or full test-suite criterion.
 - [ ] Every dependency points to a lower task number.
 - [ ] No task is larger than about 5 files, and none has "and" in its title.
 - [ ] Every task leaves the project working on its own.

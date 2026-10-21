@@ -21,7 +21,7 @@ subagents:
   max_parallel: 3
 dev:
   allowed_commands: [npm test, npm run lint, npx prettier] # what a candidate may run
-  # check_commands: [npm test, npm run lint] # what the arena runs to check the result
+  # check_commands: [npm test, npm run lint] # run once at the end of the build
   # batching: per_task # one Dev call per task, with the review still at the end
   # max_turns: 200 # editing calls have no turn or time limit unless set
   # timeout_minutes: 120

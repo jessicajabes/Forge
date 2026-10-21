@@ -72,7 +72,8 @@ const configSchema = z
         allowed_commands: z
           .array(z.string())
           .default(['npm test', 'npm run lint', 'npx prettier']),
-        // What the arena runs to check the result. Not the same as `allowed_commands`:
+        // What the build runs once at the end to check the result (a failure goes back
+        // to the Dev). Not the same as `allowed_commands`:
         // those are what a candidate may run, and may include formatters that write
         check_commands: z
           .array(z.string())

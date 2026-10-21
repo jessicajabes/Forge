@@ -36,7 +36,9 @@ For each task, in the order given:
 1. Read the files the task lists and their neighbors. Match what the code already does.
 2. Make the smallest change that meets the task. Do not add features, abstractions, or files the task does not ask for. Do not touch anything listed under "Fora do escopo".
 3. Write or update the tests the acceptance criteria ask for. A change of behavior without a test is not done.
-4. Run the checks of the criteria, and only the shell commands the Forge allowed. If a command is not allowed, you cannot run it: say so in the report instead of trying another way.
+4. Run only the targeted tests of the task's own behavior. Do not run prettier, lint, or the full test suite at any point while doing the tasks, not even after the last one, and even if a global rule says to run them on every saved file: this rule wins. The Forge runs the project's check commands (`dev.check_commands`, by default the full suite and lint) once, after the last task and review. Run only the shell commands the Forge allowed. If a command is not allowed, you cannot run it: say so in the report instead of trying another way.
+
+   When the Forge sends failed final checks, the rule above does not apply: run those commands (if allowed) to see the error, because the Forge only tells you the exit code, and fix the cause.
 5. Fix what the checks show. When every criterion of the task is met and verified by a command, mark its boxes `[x]` in the tasks file if the Forge gave you its path. Then go to the next task.
 
 If a criterion cannot be met, or a task cannot be done as written, stop that task. Say what blocks it and why. Do not fake a result.

@@ -47,6 +47,7 @@ async function setup(yml = '') {
   );
   const config = parseConfig(yml);
   config.dev.arena.candidates = 1; // plain Dev here; the arena has its own tests
+  config.dev.check_commands = []; // the final checks have their own tests below
   const prompts: string[] = [];
   const edits: boolean[] = [];
   let n = 0;
@@ -327,4 +328,106 @@ describe('build command progress lines', () => {
     );
     expect(events).toEqual(['step', 'step', 'step', 'step']);
   }, 20_000);
+});
+
+describe('build stage final checks', () => {
+  const FAILING = 'final checks of the project failed';
+
+  async function withCheck(yml = '') {
+    const s = await setup(yml);
+    // passes only once the Dev has written fixed.txt
+    await writeFile(
+      join(s.ctx.cwd, 'check.js'),
+      "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1);\n",
+    );
+    s.ctx.config.dev.check_commands = ['node check.js'];
+    return s;
+  }
+
+  it('runs the checks once at the end, after the last review', async () => {
+    const { ctx, prompts } = await withCheck();
+    await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+    const io = createFakeIO([]);
+    await stage(io)(ctx);
+    expect(io.output()).toContain('Checks finais passaram.');
+    expect(prompts.some((p) => p.includes(FAILING))).toBe(false);
+  }, 30_000);
+
+  it('sends a failing check back to the Dev, then commits the fix', async () => {
+    const { ctx, prompts } = await withCheck();
+    const inner = ctx.runner;
+    ctx.runner = async (req) => {
+      if (req.prompt.includes(FAILING))
+        await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+      return inner(req);
+    };
+    await stage()(ctx);
+    const fix = prompts.filter((p) => p.includes(FAILING));
+    expect(fix).toHaveLength(1);
+    expect(fix[0]).toContain('`node check.js`: falhou');
+    const log = await git(ctx.cwd, ['log', '--format=%s']);
+    expect(log).toContain('forge: correções dos checks finais');
+  }, 30_000);
+
+  it('reviews the Dev fix of a failing check before committing it', async () => {
+    const { ctx } = await withCheck();
+    const inner = ctx.runner;
+    ctx.runner = async (req) => {
+      if (req.prompt.includes(FAILING))
+        await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+      return inner(req);
+    };
+    const reviewerDiffs: string[] = [];
+    const makeRunner: RunnerFactory = (o) => async (req) => {
+      if (req.prompt.includes('adversarial code reviewer'))
+        reviewerDiffs.push(req.prompt);
+      return approvingRunners(o)(req);
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+    // the 3 batches, then the fix of the check
+    expect(reviewerDiffs.length).toBeGreaterThan(3);
+    expect(reviewerDiffs.at(-1)).toContain('fixed.txt');
+    expect(await readFile(join(ctx.run.dir, 'review.md'), 'utf-8')).toContain(
+      '## Correções dos checks finais',
+    );
+    expect(await git(ctx.cwd, ['status', '--porcelain'])).toBe('');
+  }, 30_000);
+
+  it('stops the run when the checks still fail after the Dev fixes', async () => {
+    const { ctx, prompts } = await withCheck();
+    await expect(stage()(ctx)).rejects.toThrow(
+      /checks finais ainda falham.*node check\.js/s,
+    );
+    expect(prompts.filter((p) => p.includes(FAILING))).toHaveLength(2);
+  }, 30_000);
+
+  it('runs a counting check exactly once across three per_task batches', async () => {
+    const { ctx } = await setup('review_mode: per_task');
+    await writeFile(
+      join(ctx.cwd, 'count.js'),
+      "require('fs').appendFileSync('runs.txt', 'x');\n",
+    );
+    ctx.config.dev.check_commands = ['node count.js'];
+    await stage()(ctx);
+    expect(await readFile(join(ctx.cwd, 'runs.txt'), 'utf-8')).toBe('x');
+  }, 30_000);
+
+  it('commits what an earlier stop left in the tree when the checks pass on resume', async () => {
+    const { ctx } = await withCheck();
+    await expect(stage()(ctx)).rejects.toThrow(/checks finais ainda falham/);
+    // a person fixes it by hand and runs again
+    await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+    await stage()(ctx);
+    expect(await git(ctx.cwd, ['status', '--porcelain'])).toBe('');
+    expect(await git(ctx.cwd, ['log', '--format=%s'])).toContain(
+      'forge: correções dos checks finais',
+    );
+  }, 30_000);
+
+  it('does nothing when there are no check commands', async () => {
+    const { ctx } = await setup();
+    const io = createFakeIO([]);
+    await stage(io)(ctx);
+    expect(io.output()).not.toContain('Checks finais');
+  });
 });

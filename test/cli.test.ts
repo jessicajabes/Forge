@@ -89,6 +89,7 @@ async function deps(
   over: Partial<CliDeps> = {},
 ) {
   const cwd = await makeRepo();
+  await writeFile(join(cwd, '.workflow.yml'), 'dev:\n  check_commands: []\n');
   const io = createFakeIO(answers);
   const d: CliDeps = {
     cwd,
