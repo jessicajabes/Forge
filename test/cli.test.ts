@@ -242,6 +242,20 @@ describe('forge-jj', () => {
     expect(s.configs[0]?.dev.arena.candidates).toBe(1);
   });
 
+  it('keeps the arena off unless --arena opts in', async () => {
+    const off = await deps(['aprovar']);
+    await main(['x', '--size', 'trivial', '--review', 'final'], off.d);
+    expect(off.s.configs[0]?.dev.arena.enabled).toBe(false);
+
+    const on = await deps(['aprovar']);
+    await main(
+      ['x', '--size', 'trivial', '--review', 'final', '--arena', '2'],
+      on.d,
+    );
+    expect(on.s.configs[0]?.dev.arena.enabled).toBe(true);
+    expect(on.s.configs[0]?.dev.arena.candidates).toBe(2);
+  });
+
   it('refuses without a TTY, in one line, before any model call', async () => {
     const { d, io, s } = await deps([], scripted(), { isTTY: false });
     expect(await main(['x'], d)).toBe(1);

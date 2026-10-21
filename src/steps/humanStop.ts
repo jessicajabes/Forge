@@ -85,7 +85,7 @@ export function createHumanStop(
             ...ctx.config,
             dev: {
               ...ctx.config.dev,
-              arena: { ...ctx.config.dev.arena, candidates: 1 },
+              arena: { ...ctx.config.dev.arena, enabled: false, candidates: 1 },
             },
           };
           io.write('Arena desligado para esta execução.');

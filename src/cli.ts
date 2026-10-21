@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { ArenaEscalation } from './arena.js';
+import { resolveArenaMode } from './arenaMode.js';
 import { logCalls } from './calls.js';
 import { join } from 'node:path';
 import { createProgressWriter } from './progress.js';
@@ -37,8 +38,8 @@ export const USAGE = `Uso: forge-jj "<tarefa>" [opções]
 Opções:
   --size <completo|trivial>   completo: com entrevista (padrão). trivial: pula o Grill
   --review <final|per_task>   final: o revisor confere tudo no fim (padrão). per_task: por tarefa
-  --no-arena                  Dev simples, sem arena
-  --arena <n>                 número de candidatos do arena
+  --no-arena                  Dev simples, sem arena (padrão)
+  --arena <n>                 liga o arena, com n candidatos
   --refresh-context           refaz o context.md mesmo na execução trivial
   --quiet                     sem progresso no terminal (o progress.jsonl continua sendo gravado)
   -h, --help                  mostra esta ajuda
@@ -254,8 +255,19 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       io.write(`Adicionei ${pre.excluded.join(' e ')} ao .git/info/exclude.`);
 
     const config = await loadConfig(cwd);
-    if (flags.arena !== undefined) config.dev.arena.candidates = flags.arena;
-    if (flags.noArena) config.dev.arena.candidates = 1;
+    resolveArenaMode(config, 'complete', {
+      arena:
+        flags.arena === undefined ? undefined : { candidates: flags.arena },
+      noArena: flags.noArena,
+    });
+    if (flags.arena !== undefined) {
+      config.dev.arena.enabled = true;
+      config.dev.arena.candidates = flags.arena;
+    }
+    if (flags.noArena) {
+      config.dev.arena.enabled = false;
+      config.dev.arena.candidates = 1;
+    }
     if (flags.review) config.review_mode = flags.review;
 
     let task = flags.task;
@@ -329,6 +341,10 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     );
     return 0;
   } catch (error) {
+    if (error instanceof UsageError) {
+      io.write(`${error.message}\n\n${USAGE}`);
+      return 2;
+    }
     if (error instanceof PreflightError) {
       io.write(error.message);
       return 1;

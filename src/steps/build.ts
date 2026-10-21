@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runArena } from '../arena.js';
+import { resolveArenaMode } from '../arenaMode.js';
 import { saveArtifact, type Task } from '../artifacts.js';
 import { devBatching } from '../config.js';
 import { commitAll, headHash } from '../git.js';
@@ -46,7 +47,7 @@ const saveState = (path: string, state: BuildState) =>
   saveArtifact(path, JSON.stringify(state, null, 2), () => undefined);
 
 /**
- * Dev and Review together (DESIGN 4.7): for each batch, the Dev (in arena by default),
+ * Dev and Review together (DESIGN 4.7): for each batch, the Dev (in arena only when opted in),
  * then the review with its correction cycles, then one local commit once approved.
  * Never pushes. A batch already committed on the branch is skipped, so a resumed run
  * goes on where it stopped.
@@ -134,8 +135,7 @@ export function createBuildStage(options: BuildOptions): StageFn {
 
   return async (ctx) => {
     const { list } = await gatherInputs(ctx, options.skillsDir);
-    // The arena is on by default; a trivial task and `candidates: 1` run a plain Dev (3.2).
-    const arena = ctx.config.dev.arena.candidates > 1 && ctx.size !== 'trivial';
+    const arena = resolveArenaMode(ctx.config, ctx.size).enabled;
     const branch = await ensureBranch(ctx.cwd, ctx.run);
     io.write(
       `Dev na branch ${branch}${arena ? ` (arena com ${ctx.config.dev.arena.candidates} candidatos)` : ''}.`,

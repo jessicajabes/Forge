@@ -107,6 +107,24 @@ describe('build stage', () => {
     );
   });
 
+  it('runs a plain Dev, not the arena, unless dev.arena.enabled is set', async () => {
+    const { ctx, prompts, edits } = await setup('review_mode: final');
+    ctx.config.dev.arena.candidates = 3; // candidates alone do not opt in
+    await stage()(ctx);
+    expect(edits).toEqual([true]);
+    expect(prompts.some((p) => p.includes('preparing an arena'))).toBe(false);
+  });
+
+  it('runs the arena when dev.arena.enabled is set', async () => {
+    const { ctx, prompts, edits } = await setup();
+    ctx.config.dev.arena.enabled = true;
+    ctx.config.dev.arena.candidates = 2;
+    // the fake runner has no valid rubric, so the arena stops right after it starts
+    await expect(stage()(ctx)).rejects.toThrow(/sem resposta válida.*: rubric/);
+    expect(prompts[0]).toContain('preparing an arena');
+    expect(edits).not.toContain(true); // no plain Dev call ran
+  });
+
   it('writes review.md at the end', async () => {
     const { ctx } = await setup();
     await stage()(ctx);
