@@ -1,4 +1,8 @@
-import { RunnerError, RunnerTimeoutError } from './runner.js';
+import {
+  RunnerError,
+  RunnerInactivityError,
+  RunnerTimeoutError,
+} from './runner.js';
 import type { RunnerEvent } from './runner.js';
 import { maskEvent, maskSecrets } from './progress.js';
 import type { ProgressEvent, ProgressWriter } from './progress.js';
@@ -66,6 +70,9 @@ const RESET = '\x1b[0m';
 export function failureReason(error: unknown): string {
   if (error instanceof RunnerTimeoutError) {
     return `encerrado por timeout após ${formatDuration(error.limitMs)}`;
+  }
+  if (error instanceof RunnerInactivityError) {
+    return `sem atividade por ${formatDuration(error.idleMs)}, processo encerrado`;
   }
   if (error instanceof RunnerError && error.exitCode !== null) {
     return `código de saída ${error.exitCode}`;

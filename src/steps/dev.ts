@@ -1,16 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseTasks, type Task } from '../artifacts.js';
-import {
-  branchExists,
-  checkout,
-  commitAll,
-  currentBranch,
-  git,
-  listBranches,
-} from '../git.js';
-import { branchName } from '../branchName.js';
-import { readState, saveBranch } from '../state.js';
+import { commitAll, currentBranch, git } from '../git.js';
+import { saveBranch } from '../state.js';
 import type { RunContext } from '../orchestrator.js';
 import { workflowDir, type Run } from '../runs.js';
 import { loadSkill } from '../skills.js';
@@ -48,36 +40,26 @@ export function taskBlocks(markdown: string): Map<number, string> {
 }
 
 /**
- * Makes sure the Dev works on its own branch `forge/<creative-name>` (DESIGN 4.6). The
- * name is stored in state.json, so a resumed run reuses it. A `forge/*` branch already
- * checked out is kept. The run folder still uses the slug.
+ * The Forge never creates a branch: the Dev works, and commits, on the branch the person is on
+ * (a protected one is refused by the preflight). The name is stored in state.json.
  */
 export async function ensureBranch(cwd: string, run: Run): Promise<string> {
   const current = await currentBranch(cwd);
-  const stored = (await readState(run.dir))?.branch;
-  if (stored) {
-    if (current !== stored)
-      await checkout(cwd, stored, !(await branchExists(cwd, stored)));
-    return stored;
-  }
-  if (current?.startsWith('forge/')) {
-    await saveBranch(run.dir, current);
-    return current;
-  }
-  // runs started before the creative name: forge/<slug> holding this run's commits
-  const legacy = `forge/${run.slug}`;
-  if (await branchExists(cwd, legacy)) {
-    const log = await git(cwd, ['log', '--format=%B', legacy]).catch(() => '');
-    if (log.includes(`Forge-Run: ${run.id}`)) {
-      await checkout(cwd, legacy);
-      await saveBranch(run.dir, legacy);
-      return legacy;
-    }
-  }
-  const name = branchName(run.id, await listBranches(cwd, 'forge/'));
-  await checkout(cwd, name, true);
-  await saveBranch(run.dir, name);
-  return name;
+  if (!current)
+    throw new Error(
+      'o Forge precisa estar numa branch (HEAD solto): troque para a branch da tarefa.',
+    );
+  await saveBranch(run.dir, current);
+  return current;
+}
+
+/** `<branch> - <text>`: every commit of the Forge starts with the name of the branch it is on. */
+export async function commitSubject(
+  cwd: string,
+  text: string,
+): Promise<string> {
+  const branch = await currentBranch(cwd);
+  return `${branch ? `${branch} - ` : ''}${text}`.slice(0, 100);
 }
 
 /** Batch numbers already committed on this branch, read from the `Forge-Batch` trailers. */
@@ -212,7 +194,7 @@ export async function commitBatch(
 ): Promise<string | null> {
   const ids = batch.tasks.map((t) => `T${t.id}`).join(', ');
   const titles = batch.tasks.map((t) => t.title).join('; ');
-  const subject = `forge: ${ids} - ${titles}`.slice(0, 100);
+  const subject = await commitSubject(ctx.cwd, `${ids} - ${titles}`);
   return commitAll(ctx.cwd, subject, [
     `Forge-Run: ${ctx.run.id}`,
     `Forge-Batch: ${batch.index}`,

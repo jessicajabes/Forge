@@ -98,7 +98,7 @@ Ctrl+C keeps a draft, and the next run offers to continue it.
 ## What Forge does to your repository
 
 - It refuses to start outside a git repository, with uncommitted changes, or on `main` or `master`.
-- The Dev works on its own branch `forge/<slug>` and makes one local commit per batch, after the review approves it.
+- The Forge never creates a branch: the Dev works on the branch you are on (not `main` or `master`) and makes one local commit per batch, after the review approves it. Every commit subject starts with the branch name, for example `TPC-8890 - T1 - descrição`. A `claude` call with no output for 2 minutes is killed (`claude.inactivity_kill_minutes`, 0 turns it off).
 - **It never pushes.** Nothing leaves your machine except the prompts sent to the agents you chose.
 - Its files live in `.workflow/` and `.workflow.yml`. The first run adds both to `.git/info/exclude`; your `.gitignore` is never touched.
 - Only one run at a time per repository.

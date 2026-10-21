@@ -158,11 +158,11 @@ describe('forge-jj', () => {
       'lens',
       'lens',
     ]);
-    expect(await git(cwd, ['branch', '--show-current'])).toMatch(
-      /^forge\/[a-z]+-[a-z]+$/,
-    );
-    expect(await git(cwd, ['rev-list', '--count', 'feature/x..HEAD'])).toBe(
-      '1',
+    // no new branch: the commit goes on the current one, with its name in the subject
+    expect(await git(cwd, ['branch', '--show-current'])).toBe('feature/x');
+    expect(await git(cwd, ['rev-list', '--count', 'HEAD'])).toBe('2');
+    expect(await git(cwd, ['log', '-1', '--format=%s'])).toMatch(
+      /^feature\/x - T1 - /,
     );
     expect(io.output()).toContain('Pronto.');
     expect(io.output()).toContain('Custo estimado do Dev (Dev simples)');

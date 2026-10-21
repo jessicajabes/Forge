@@ -71,14 +71,18 @@ async function setup(yml = '') {
 
 const stage = (io = createFakeIO([])) =>
   createBuildStage({ io, makeRunner: approvingRunners });
-const commitsAhead = (cwd: string) =>
-  git(cwd, ['rev-list', '--count', 'feature/x..HEAD']);
+// the Forge commits on the branch itself, so count the commits after the initial one
+const commitsAhead = async (cwd: string) =>
+  String(Number(await git(cwd, ['rev-list', '--count', 'HEAD'])) - 1);
 
 describe('build stage', () => {
-  it('works on a branch forge/<slug> and makes one commit for the whole run in final mode', async () => {
+  it('commits on the branch it is on, named in the subject, with one commit for the whole run in final mode', async () => {
     const { ctx, edits } = await setup('review_mode: final');
     await stage()(ctx);
-    expect(await currentBranch(ctx.cwd)).toMatch(/^forge\/[a-z]+-[a-z]+$/);
+    expect(await currentBranch(ctx.cwd)).toBe('feature/x');
+    expect(await git(ctx.cwd, ['log', '-1', '--format=%s'])).toMatch(
+      /^feature\/x - T1, T2, T3 - /,
+    );
     expect(edits).toEqual([true]);
     expect(await commitsAhead(ctx.cwd)).toBe('1');
     const message = await git(ctx.cwd, ['log', '-1', '--format=%B']);
@@ -366,7 +370,7 @@ describe('build stage final checks', () => {
     expect(fix).toHaveLength(1);
     expect(fix[0]).toContain('`node check.js`: falhou');
     const log = await git(ctx.cwd, ['log', '--format=%s']);
-    expect(log).toContain('forge: correções dos checks finais');
+    expect(log).toContain('feature/x - correções dos checks finais');
   }, 30_000);
 
   it('reviews the Dev fix of a failing check before committing it', async () => {
@@ -420,7 +424,7 @@ describe('build stage final checks', () => {
     await stage()(ctx);
     expect(await git(ctx.cwd, ['status', '--porcelain'])).toBe('');
     expect(await git(ctx.cwd, ['log', '--format=%s'])).toContain(
-      'forge: correções dos checks finais',
+      'feature/x - correções dos checks finais',
     );
   }, 30_000);
 

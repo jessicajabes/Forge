@@ -12,6 +12,7 @@ import type { RunnerFactory } from '../runner.js';
 import {
   type Batch,
   commitBatch,
+  commitSubject,
   committedBatches,
   ensureBranch,
   gatherInputs,
@@ -194,10 +195,11 @@ export function createBuildStage(options: BuildOptions): StageFn {
           ),
         { base: state.base, groupByTask: true },
       );
-      const hash = await commitAll(ctx.cwd, 'forge: correções da revisão', [
-        `Forge-Run: ${ctx.run.id}`,
-        'Forge-Batch: review',
-      ]);
+      const hash = await commitAll(
+        ctx.cwd,
+        await commitSubject(ctx.cwd, 'correções da revisão'),
+        [`Forge-Run: ${ctx.run.id}`, 'Forge-Batch: review'],
+      );
       state.reviewed = true;
       await saveState(statePath, state);
       io.write(
@@ -263,10 +265,11 @@ export function createBuildStage(options: BuildOptions): StageFn {
           if ((await workingDiff(ctx.cwd)) !== before) continue;
         }
         // Also on a resumed run: edits an earlier stop left uncommitted are committed here
-        await commitAll(ctx.cwd, 'forge: correções dos checks finais', [
-          `Forge-Run: ${ctx.run.id}`,
-          'Forge-Batch: checks',
-        ]);
+        await commitAll(
+          ctx.cwd,
+          await commitSubject(ctx.cwd, 'correções dos checks finais'),
+          [`Forge-Run: ${ctx.run.id}`, 'Forge-Batch: checks'],
+        );
         return;
       }
       const summary = failed.map((c) => `- \`${c.command}\`: ${c.detail}`);

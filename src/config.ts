@@ -101,9 +101,13 @@ const configSchema = z
         arena: { enabled: false, candidates: 3 },
       }),
     claude: z
-      .object({ isolated: z.boolean().default(true) })
+      .object({
+        isolated: z.boolean().default(true),
+        // A claude with no output for this long is killed (a hung call); 0 turns it off
+        inactivity_kill_minutes: z.number().nonnegative().default(2),
+      })
       .strict()
-      .default({ isolated: true }),
+      .default({ isolated: true, inactivity_kill_minutes: 2 }),
   })
   .strict()
   .refine((c) => c.max_context_tokens.warn < c.max_context_tokens.limit, {

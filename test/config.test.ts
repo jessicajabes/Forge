@@ -35,6 +35,18 @@ describe('config', () => {
     ).toBe(true);
   });
 
+  it('kills a silent claude after 2 minutes by default, and 0 turns it off', () => {
+    expect(parseConfig('').claude.inactivity_kill_minutes).toBe(2);
+    expect(
+      parseConfig('claude: { inactivity_kill_minutes: 5 }').claude
+        .inactivity_kill_minutes,
+    ).toBe(5);
+    expect(
+      parseConfig('claude: { inactivity_kill_minutes: 0 }').claude
+        .inactivity_kill_minutes,
+    ).toBe(0);
+  });
+
   it('defaults max_review_cycles to 10 and honors an explicit value', () => {
     expect(parseConfig('').max_review_cycles).toBe(10);
     expect(parseConfig('max_review_cycles: 2').max_review_cycles).toBe(2);

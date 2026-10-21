@@ -34,6 +34,7 @@ function makeRunner(config: Config): RunnerFactory {
         : createClaudeCliRunner({
             cwd: opts.cwd,
             isolated: config.claude.isolated,
+            inactivityKillMs: config.claude.inactivity_kill_minutes * 60_000,
             ...(config.dev.max_turns !== undefined
               ? { editMaxTurns: config.dev.max_turns }
               : {}),
