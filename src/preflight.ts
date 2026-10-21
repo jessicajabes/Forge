@@ -1,4 +1,4 @@
-import { currentBranch, isClean, isGitRepo } from './git.js';
+import { currentBranch, isGitRepo, statusLines } from './git.js';
 import { LockedError, acquireLock, ensureLocalExclude } from './runs.js';
 
 export type PreflightCode =
@@ -48,10 +48,15 @@ export async function preflight(opts: {
     );
   }
   const excluded = await ensureLocalExclude(cwd);
-  if (!opts.allowDirty && !(await isClean(cwd))) {
+  const dirty = opts.allowDirty ? [] : await statusLines(cwd);
+  if (dirty.length > 0) {
+    const shown = dirty.slice(0, 5).map((l) => `  ${l}`);
+    const more = dirty.length > 5 ? [`  ... e mais ${dirty.length - 5}`] : [];
+    // `git stash` alone leaves untracked files (`??`) behind, so the tree would stay dirty
+    const untracked = dirty.some((l) => l.startsWith('??'));
     throw new PreflightError(
       'dirty-tree',
-      'há alterações não commitadas: faça commit ou `git stash` antes de continuar.',
+      `há alterações não commitadas:\n${[...shown, ...more].join('\n')}\nFaça commit ou rode ${untracked ? '`git stash -u` (o `-u` guarda também os arquivos novos, marcados com ??)' : '`git stash`'} antes de continuar.`,
     );
   }
   const branch = await currentBranch(cwd);
