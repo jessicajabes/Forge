@@ -131,7 +131,7 @@ describe('arena', () => {
     expect(note).toContain('- **Enxertos**: nenhum');
     expect(note).not.toContain('Arena note');
     expect(note).not.toContain('Grafts');
-    expect(note).toContain('`node --version`: passou');
+    expect(note).toContain('checks no fim da run');
     expect(existsSync(join(s.arenaDir, 'rubric.md'))).toBe(true);
 
     // worktrees are gone, from disk and from git
@@ -372,20 +372,18 @@ describe('arena after an interrupted run', () => {
 });
 
 describe('arena checks', () => {
-  it('run the check_commands, not the allowed_commands, after the worktrees are gone', async () => {
-    const probe = (dir: string) => `test ! -e ${dir}`;
-    const s = await setup({
-      yml: 'dev:\n  allowed_commands: [node --version]\n  check_commands: [node --version]\n',
-    });
-    // A check that passes only when the first worktree no longer exists
-    s.ctx.config.dev.check_commands = [
-      probe(join(s.arenaDir, 'candidato-1')),
-      'node --version',
-    ];
+  it('does not run the check_commands: the build runs them once, at the end', async () => {
+    const s = await setup();
+    // a check that counts its own runs
+    await writeFile(
+      join(s.ctx.cwd, 'count.js'),
+      "require('fs').appendFileSync('runs.txt', 'x');\n",
+    );
+    s.ctx.config.dev.check_commands = ['node count.js'];
     await runArena(s.ctx, s.batch, { makeRunner: s.makeRunner, io: s.io });
+    expect(existsSync(join(s.ctx.cwd, 'runs.txt'))).toBe(false);
     const note = await readFile(join(s.arenaDir, 'arena.md'), 'utf-8');
-    expect(note).toContain('candidato-1`: passou');
-    expect(note).toContain('`node --version`: passou');
+    expect(note).toContain('checks no fim da run');
   });
 
   it('default to npm test and npm run lint, without the formatter of allowed_commands', () => {

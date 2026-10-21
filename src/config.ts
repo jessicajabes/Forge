@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -52,7 +52,7 @@ const configSchema = z
         lessons: { runner: 'claude-cli' },
         review: { runner: 'claude-cli', reviewers: [] },
       }),
-    // Not set: resolved after the parse (per_task, or final when dev.batching is all)
+    // Not set: resolved after the parse (final, or per_task when dev.batching is per_task and nothing says otherwise)
     review_mode: z.enum(['final', 'per_task']).optional(),
     max_review_cycles: z.number().int().positive().default(10),
     max_lessons: z.number().int().positive().default(30),
@@ -72,7 +72,8 @@ const configSchema = z
         allowed_commands: z
           .array(z.string())
           .default(['npm test', 'npm run lint', 'npx prettier']),
-        // What the arena runs to check the result. Not the same as `allowed_commands`:
+        // What the build runs once at the end to check the result (a failure goes back
+        // to the Dev). Not the same as `allowed_commands`:
         // those are what a candidate may run, and may include formatters that write
         check_commands: z
           .array(z.string())
@@ -84,23 +85,29 @@ const configSchema = z
         timeout_minutes: z.number().positive().optional(),
         arena: z
           .object({
+            // Opt-in: the arena only runs when this is set to true
+            enabled: z.boolean().default(false),
             candidates: z.number().int().positive().default(3),
             models: z.array(z.string()).optional(),
             judge: reviewerConfig.optional(),
           })
           .strict()
-          .default({ candidates: 3 }),
+          .default({ enabled: false, candidates: 3 }),
       })
       .strict()
       .default({
         allowed_commands: ['npm test', 'npm run lint', 'npx prettier'],
         check_commands: ['npm test', 'npm run lint'],
-        arena: { candidates: 3 },
+        arena: { enabled: false, candidates: 3 },
       }),
     claude: z
-      .object({ isolated: z.boolean().default(true) })
+      .object({
+        isolated: z.boolean().default(true),
+        // A claude with no output for this long is killed (a hung call); 0 turns it off
+        inactivity_kill_minutes: z.number().nonnegative().default(2),
+      })
       .strict()
-      .default({ isolated: true }),
+      .default({ isolated: true, inactivity_kill_minutes: 2 }),
   })
   .strict()
   .refine((c) => c.max_context_tokens.warn < c.max_context_tokens.limit, {
@@ -112,9 +119,8 @@ const configSchema = z
   })
   .transform((c) => ({
     ...c,
-    // Implicit default: per_task, unless the config already batches everything
-    review_mode:
-      c.review_mode ?? (c.dev.batching === 'all' ? 'final' : 'per_task'),
+    // Implicit default: final (one Dev call for every task, then the checks, then one review)
+    review_mode: c.review_mode ?? 'final',
   }));
 
 export type Config = z.infer<typeof configSchema>;
@@ -148,6 +154,53 @@ export function parseConfig(text: string): Config {
     throw new ConfigError(`.workflow.yml inválido: ${problems.join('; ')}`);
   }
   return result.data;
+}
+
+/** Workflow written to a repo that has no `.workflow.yml`. The arena stays opt-in (no `enabled`). */
+export const DEFAULT_WORKFLOW_YML = `steps:
+  grill:
+    runner: claude-cli
+    model: claude-opus-5-5
+  recon:
+    runner: claude-cli
+    model: claude-haiku-5-5
+  tasks:
+    runner: claude-cli
+    model: claude-haiku-5-5
+  dev:
+    runner: claude-cli
+    model: claude-sonnet-5-5
+  review:
+    runner: claude-cli
+    model: claude-opus-5-5
+    reviewers:
+      - runner: claude-cli
+        model: claude-sonnet-5-5
+      - runner: copilot-cli
+        model: auto
+  lessons:
+    runner: claude-cli
+    model: claude-haiku-5-5
+dev:
+  arena:
+    candidates: 3
+    judge:
+      runner: claude-cli
+      model: claude-opus-5-5
+`;
+
+/** Writes `DEFAULT_WORKFLOW_YML` only when `.workflow.yml` is missing; returns whether it created it. */
+export async function ensureWorkflowFile(cwd: string): Promise<boolean> {
+  try {
+    await writeFile(join(cwd, '.workflow.yml'), DEFAULT_WORKFLOW_YML, {
+      encoding: 'utf-8',
+      flag: 'wx',
+    });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
 }
 
 /** Loads `.workflow.yml` from the target repo; a missing file means all defaults. */

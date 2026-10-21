@@ -11,7 +11,7 @@ steps:
     reviewers: # one per model; runners can be mixed
       - { runner: claude-cli, model: <model A> }
       - { runner: copilot-cli, model: <model B> }
-review_mode: final # final | per_task
+review_mode: final # final (default: one Dev call, the checks, then the review) | per_task
 max_review_cycles: 10
 max_lessons: 30
 max_context_tokens: # per conversation; initial values are estimates
@@ -21,7 +21,7 @@ subagents:
   max_parallel: 3
 dev:
   allowed_commands: [npm test, npm run lint, npx prettier] # what a candidate may run
-  # check_commands: [npm test, npm run lint] # what the arena runs to check the result
+  # check_commands: [npm test, npm run lint] # run once at the end of the build
   # batching: per_task # one Dev call per task, with the review still at the end
   # max_turns: 200 # editing calls have no turn or time limit unless set
   # timeout_minutes: 120

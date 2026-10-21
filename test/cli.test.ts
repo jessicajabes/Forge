@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { UsageError, main, parseFlags, type CliDeps } from '../src/cli.js';
-import type { Config } from '../src/config.js';
+import { DEFAULT_WORKFLOW_YML, type Config } from '../src/config.js';
 import { git } from '../src/git.js';
 import type { RunnerFactory } from '../src/runner.js';
 import { findIncompleteRun } from '../src/state.js';
@@ -89,6 +89,7 @@ async function deps(
   over: Partial<CliDeps> = {},
 ) {
   const cwd = await makeRepo();
+  await writeFile(join(cwd, '.workflow.yml'), 'dev:\n  check_commands: []\n');
   const io = createFakeIO(answers);
   const d: CliDeps = {
     cwd,
@@ -157,11 +158,11 @@ describe('forge-jj', () => {
       'lens',
       'lens',
     ]);
-    expect(await git(cwd, ['branch', '--show-current'])).toMatch(
-      /^forge\/[a-z]+-[a-z]+$/,
-    );
-    expect(await git(cwd, ['rev-list', '--count', 'feature/x..HEAD'])).toBe(
-      '1',
+    // no new branch: the commit goes on the current one, with its name in the subject
+    expect(await git(cwd, ['branch', '--show-current'])).toBe('feature/x');
+    expect(await git(cwd, ['rev-list', '--count', 'HEAD'])).toBe('2');
+    expect(await git(cwd, ['log', '-1', '--format=%s'])).toMatch(
+      /^feature\/x - T1 - /,
     );
     expect(io.output()).toContain('Pronto.');
     expect(io.output()).toContain('Custo estimado do Dev (Dev simples)');
@@ -229,7 +230,7 @@ describe('forge-jj', () => {
     await main(['x'], asked.d);
     expect(asked.io.output()).toContain('Qual o tamanho da tarefa?');
     expect(asked.io.output()).toContain('Como revisar?');
-    expect(asked.s.configs[0]?.review_mode).toBe('per_task');
+    expect(asked.s.configs[0]?.review_mode).toBe('final');
   });
 
   it('--review per_task and --no-arena change the config the run uses', async () => {
@@ -240,6 +241,63 @@ describe('forge-jj', () => {
     );
     expect(s.configs[0]?.review_mode).toBe('per_task');
     expect(s.configs[0]?.dev.arena.candidates).toBe(1);
+  });
+
+  it('keeps the arena off unless --arena opts in', async () => {
+    const off = await deps(['aprovar']);
+    await main(['x', '--size', 'trivial', '--review', 'final'], off.d);
+    expect(off.s.configs[0]?.dev.arena.enabled).toBe(false);
+
+    const on = await deps(['aprovar']);
+    await main(
+      ['x', '--size', 'trivial', '--review', 'final', '--arena', '2'],
+      on.d,
+    );
+    expect(on.s.configs[0]?.dev.arena.enabled).toBe(true);
+    expect(on.s.configs[0]?.dev.arena.candidates).toBe(2);
+  });
+
+  it('asks how to run the Dev, and the arena per task sets one Dev per task', async () => {
+    // 1 = completo, 1 = review no final, 3 = arena por tarefa
+    const { d, io, s, cwd } = await deps(['1', '1', '3', 'aprovar']);
+    await main(['x'], d);
+    expect(io.output()).toContain('Como rodar o Dev?');
+    expect(io.output()).toContain('3) arena por tarefa');
+    const config = s.configs[0];
+    expect(config?.dev.arena.enabled).toBe(true);
+    expect(config?.dev.batching).toBe('per_task');
+    expect(config?.review_mode).toBe('final');
+    const runs = join(cwd, '.workflow', 'runs');
+    const [id] = await readdir(runs);
+    const saved = JSON.parse(
+      await readFile(join(runs, id ?? '', 'choices.json'), 'utf-8'),
+    );
+    expect(saved).toEqual({
+      review_mode: 'final',
+      arena: true,
+      batching: 'per_task',
+    });
+  });
+
+  it('arena once keeps one Dev for all tasks, and Enter keeps the arena off', async () => {
+    const once = await deps(['1', '1', '2', 'aprovar']);
+    await main(['x'], once.d);
+    expect(once.s.configs[0]?.dev.arena.enabled).toBe(true);
+    expect(once.s.configs[0]?.dev.batching).toBe('all');
+
+    const enter = await deps(['1', '1', '', 'aprovar']);
+    await main(['x'], enter.d);
+    expect(enter.s.configs[0]?.dev.arena.enabled).toBe(false);
+  });
+
+  it('does not ask about the arena for a trivial task or when --arena/--no-arena decides it', async () => {
+    const trivial = await deps(['2', '', 'aprovar']); // 2 = trivial
+    await main(['x'], trivial.d);
+    expect(trivial.io.output()).not.toContain('Como rodar o Dev?');
+
+    const flagged = await deps(['2', '', 'aprovar']);
+    await main(['x', '--no-arena'], flagged.d);
+    expect(flagged.io.output()).not.toContain('Como rodar o Dev?');
   });
 
   it('refuses without a TTY, in one line, before any model call', async () => {
@@ -309,6 +367,24 @@ describe('forge-jj', () => {
     );
     expect(io.output()).toContain('Execução cancelada');
     expect(s.calls).not.toContain('dev');
+  });
+
+  it('creates the default .workflow.yml before loading the config, and never rewrites it', async () => {
+    const { d, cwd, io, s } = await deps(['cancelar', 'cancelar']);
+    const file = join(cwd, '.workflow.yml');
+    await rm(file);
+    const argv = ['x', '--size', 'trivial', '--review', 'final'];
+    expect(await main(argv, d)).toBe(0);
+    const created = await readFile(file, 'utf8');
+    expect(created).toBe(DEFAULT_WORKFLOW_YML);
+    expect(io.output()).toContain('Criei .workflow.yml com o workflow padrão.');
+    expect(s.configs[0]?.steps.dev.model).toBe('claude-sonnet-5-5');
+    expect(await git(cwd, ['status', '--porcelain'])).toBe('');
+
+    const before = io.output().split('Criei .workflow.yml').length;
+    expect(await main(argv, d)).toBe(0);
+    expect(io.output().split('Criei .workflow.yml').length).toBe(before);
+    expect(await readFile(file, 'utf8')).toBe(created);
   });
 
   it('never leaves the repo lock behind', async () => {

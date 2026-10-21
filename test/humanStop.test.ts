@@ -95,7 +95,9 @@ describe('human stop', () => {
 describe('estimateDevCost', () => {
   it('is relative: 6 calls per batch with 3 candidates', () => {
     const e = estimateDevCost({
-      config: parseConfig('review_mode: final'),
+      config: parseConfig(
+        'review_mode: final\ndev: { arena: { enabled: true } }',
+      ),
       taskCount: 3,
       size: 'complete',
     });
@@ -106,7 +108,9 @@ describe('estimateDevCost', () => {
 
   it('grows with review_mode per_task', () => {
     const e = estimateDevCost({
-      config: parseConfig('review_mode: per_task'),
+      config: parseConfig(
+        'review_mode: per_task\ndev: { arena: { enabled: true } }',
+      ),
       taskCount: 3,
       size: 'complete',
     });

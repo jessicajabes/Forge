@@ -1,3 +1,4 @@
+import { resolveArenaMode } from './arenaMode.js';
 import { devBatching, type Config } from './config.js';
 import type { TaskSize } from './orchestrator.js';
 
@@ -13,7 +14,7 @@ export type CostEstimate = {
 
 /**
  * A relative estimate, in model calls, because `claude -p` does not report real cost
- * (DESIGN 4.10). With the arena a batch is: rubric, N candidates, judge, integration.
+ * (DESIGN 4.10). With the arena (opt-in) a batch is: rubric, N candidates, judge, integration.
  */
 export function estimateDevCost(opts: {
   config: Config;
@@ -21,8 +22,7 @@ export function estimateDevCost(opts: {
   size: TaskSize;
 }): CostEstimate {
   const { config, taskCount, size } = opts;
-  const candidates = config.dev.arena.candidates;
-  const arena = size !== 'trivial' && candidates > 1;
+  const { enabled: arena, candidates } = resolveArenaMode(config, size);
   const batches =
     devBatching(config) === 'per_task' ? Math.max(taskCount, 1) : 1;
   const callsPerBatch = arena ? candidates + 3 : 1;

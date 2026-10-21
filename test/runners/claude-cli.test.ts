@@ -2,7 +2,11 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { RunnerTimeoutError, type RunnerEvent } from '../../src/runner.js';
+import {
+  RunnerInactivityError,
+  RunnerTimeoutError,
+  type RunnerEvent,
+} from '../../src/runner.js';
 import {
   ClaudeCliError,
   buildInvocation,
@@ -353,6 +357,65 @@ describe('createClaudeCliRunner', () => {
       expect(await outcome).toBe('oi');
       clock.advance(30 * MIN);
       expect(idle()).toHaveLength(3);
+    });
+
+    it('kills the claude after inactivityKillMs without output, with or without a listener', async () => {
+      for (const listen of [true, false]) {
+        const clock = fakeClock();
+        const { child } = hangingChild();
+        let killed = '';
+        child.kill = ((signal: string) => {
+          killed = signal;
+          return true;
+        }) as ChildProcess['kill'];
+        const runner = createClaudeCliRunner({
+          cwd: '/repo',
+          clock,
+          inactivityKillMs: 2 * MIN,
+          spawnFn: () => child,
+        });
+        const outcome = runner({
+          ...read,
+          ...(listen ? { onEvent: () => undefined } : {}),
+        });
+        const failure = outcome.catch((e: unknown) => e);
+        clock.advance(2 * MIN - 1);
+        expect(killed).toBe('');
+        clock.advance(1);
+        const error = await failure;
+        expect(killed).toBe('SIGTERM');
+        expect(error).toBeInstanceOf(RunnerInactivityError);
+        expect((error as RunnerInactivityError).idleMs).toBe(2 * MIN);
+      }
+    });
+
+    it('a stream line restarts the inactivity kill, and a finished call is never killed', async () => {
+      const clock = fakeClock();
+      const { child, stdout } = hangingChild();
+      let kills = 0;
+      child.kill = (() => {
+        kills++;
+        return true;
+      }) as ChildProcess['kill'];
+      const runner = createClaudeCliRunner({
+        cwd: '/repo',
+        clock,
+        inactivityKillMs: 2 * MIN,
+        spawnFn: () => child,
+      });
+      const outcome = runner({ ...read, onEvent: () => undefined });
+      clock.advance(2 * MIN - 1);
+      stdout.write('{"type":"system","subtype":"hook"}\n');
+      await new Promise((r) => setImmediate(r));
+      clock.advance(2 * MIN - 1);
+      expect(kills).toBe(0);
+      stdout.end(
+        '{"type":"result","subtype":"success","is_error":false,"result":"oi"}\n',
+      );
+      child.emit('close', 0);
+      expect(await outcome).toBe('oi');
+      clock.advance(10 * MIN);
+      expect(kills).toBe(0);
     });
 
     it('emits one activity event when output returns after an inactivity warning', async () => {

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { branchName } from '../src/branchName.js';
-import { checkout, currentBranch } from '../src/git.js';
+import { checkout, currentBranch, git, listBranches } from '../src/git.js';
 import { createRun, ensureLocalExclude } from '../src/runs.js';
 import { readState, writeState } from '../src/state.js';
-import { ensureBranch, splitBatches, taskBlocks } from '../src/steps/dev.js';
+import {
+  commitSubject,
+  ensureBranch,
+  splitBatches,
+  taskBlocks,
+} from '../src/steps/dev.js';
 import { makeRepo } from './helpers.js';
 import { parseTasks } from '../src/artifacts.js';
 
@@ -51,41 +53,26 @@ describe('ensureBranch', () => {
     return { cwd, run };
   }
 
-  it('creates forge/<creative name>, not the slug, and stores it in state.json', async () => {
+  it('does not create a branch: it stays on the current one and stores it in state.json', async () => {
     const { cwd, run } = await setup();
-    const branch = await ensureBranch(cwd, run);
-    expect(branch).toBe(branchName(run.id, []));
-    expect(branch).not.toContain(run.slug);
-    expect(await currentBranch(cwd)).toBe(branch);
-    expect((await readState(run.dir))?.branch).toBe(branch);
-    expect(await readFile(join(run.dir, 'state.json'), 'utf-8')).toContain(
-      branch,
+    const before = await currentBranch(cwd);
+    expect(await ensureBranch(cwd, run)).toBe(before);
+    expect(await currentBranch(cwd)).toBe(before);
+    expect((await readState(run.dir))?.branch).toBe(before);
+    expect(await listBranches(cwd, 'forge/')).toEqual([]);
+  });
+
+  it('refuses a detached HEAD, which has no branch name to commit under', async () => {
+    const { cwd, run } = await setup();
+    await git(cwd, ['checkout', '-q', '--detach']);
+    await expect(ensureBranch(cwd, run)).rejects.toThrow(/HEAD solto/);
+  });
+
+  it('every commit subject starts with the branch name', async () => {
+    const { cwd } = await setup();
+    await checkout(cwd, 'TPC-8890', true);
+    expect(await commitSubject(cwd, 'T1 - Tarefa 1')).toBe(
+      'TPC-8890 - T1 - Tarefa 1',
     );
-  });
-
-  it('a resumed run reuses the name stored in state.json', async () => {
-    const { cwd, run } = await setup();
-    const first = await ensureBranch(cwd, run);
-    await checkout(cwd, 'feature/x');
-    expect(await ensureBranch(cwd, run)).toBe(first);
-    expect(await currentBranch(cwd)).toBe(first);
-  });
-
-  it('keeps a forge/* branch already checked out and records it in state.json', async () => {
-    const { cwd, run } = await setup();
-    await checkout(cwd, 'forge/outra', true);
-    expect(await ensureBranch(cwd, run)).toBe('forge/outra');
-    expect((await readState(run.dir))?.branch).toBe('forge/outra');
-    await checkout(cwd, 'feature/x');
-    expect(await ensureBranch(cwd, run)).toBe('forge/outra');
-    expect(await currentBranch(cwd)).toBe('forge/outra');
-  });
-
-  it('the stored branch wins over another forge/* branch checked out', async () => {
-    const { cwd, run } = await setup();
-    const first = await ensureBranch(cwd, run);
-    await checkout(cwd, 'forge/outra', true);
-    expect(await ensureBranch(cwd, run)).toBe(first);
-    expect(await currentBranch(cwd)).toBe(first);
   });
 });

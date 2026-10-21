@@ -32,6 +32,16 @@ export class RunnerTimeoutError extends RunnerError {
   }
 }
 
+/** The CLI printed nothing for too long and was killed (`claude.inactivity_kill_minutes`). */
+export class RunnerInactivityError extends RunnerError {
+  readonly idleMs: number;
+  constructor(message: string, idleMs: number, stderr = '') {
+    super(message, { stderr });
+    this.name = 'RunnerInactivityError';
+    this.idleMs = idleMs;
+  }
+}
+
 /**
  * The only thing the orchestrator knows about a provider (DESIGN 4.2).
  * Each provider is a small file in `runners/` that returns a function of this type.

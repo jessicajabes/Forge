@@ -84,7 +84,17 @@ Rules:
   return spec;
 }
 
-export type TasksOptions = { skillsDir?: string };
+/** How many times the Grill may be called to settle the doubts the tasks raise. */
+const MAX_DOUBT_ROUNDS = 2;
+
+export type TasksOptions = {
+  skillsDir?: string;
+  /**
+   * Called when `tasks.md` ends with `## Dúvidas`: a doubt only a person can settle goes to the
+   * Grill right away, and the tasks are written again from the updated `spec.md`.
+   */
+  resolveDoubts?: (ctx: RunContext, doubts: string[]) => Promise<void>;
+};
 
 /** Writes `tasks.md` with the `tasks` skill, from spec.md, context.md and lessons.md. */
 export function createTasksStage(options: TasksOptions = {}): StageFn {
@@ -99,7 +109,8 @@ export function createTasksStage(options: TasksOptions = {}): StageFn {
       join(workflowDir(ctx.cwd), 'lessons.md'),
     );
 
-    const prompt = `${skill.body}
+    for (let round = 0; ; round++) {
+      const prompt = `${skill.body}
 
 ---
 
@@ -115,7 +126,17 @@ ${context}
 ${lessons?.trim() ? `\n## lessons.md\n\n${lessons}\n` : ''}
 Reply with the contents of tasks.md and nothing else.
 `;
-    const tasks = await ask(ctx, 'tasks', prompt, parseTasks);
-    await saveArtifact(join(ctx.run.dir, 'tasks.md'), tasks, parseTasks);
+      const tasks = await ask(ctx, 'tasks', prompt, parseTasks);
+      await saveArtifact(join(ctx.run.dir, 'tasks.md'), tasks, parseTasks);
+      const { doubts } = parseTasks(tasks);
+      if (
+        doubts.length === 0 ||
+        !options.resolveDoubts ||
+        round === MAX_DOUBT_ROUNDS
+      )
+        return;
+      await options.resolveDoubts(ctx, doubts);
+      spec = (await readOptional(join(ctx.run.dir, 'spec.md'))) ?? spec;
+    }
   };
 }

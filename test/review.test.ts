@@ -15,7 +15,9 @@ import {
   computeVerdict,
   parseDevAnswers,
   parseLead,
+  renderReview,
   reviewBatch,
+  type Cycle,
 } from '../src/steps/review.js';
 import { parseTasks } from '../src/artifacts.js';
 import { createFakeIO } from './fakeIO.js';
@@ -115,7 +117,7 @@ async function setup(leads: string[], yml = '') {
     reviewerPrompts,
     leadPrompts,
     reviewerModels,
-    reviewPath: join(run.dir, 'review-batch-1.md'),
+    reviewPath: join(run.dir, 'review-lote-1.md'),
   };
 }
 
@@ -247,7 +249,7 @@ describe('reviewBatch', () => {
     ).rejects.toBeInstanceOf(ReviewEscalation);
     expect(s.feedbacks).toHaveLength(2);
     const review = await readFile(s.reviewPath, 'utf-8');
-    expect(review).toContain('- **Veredito**: escalado ao humano');
+    expect(review).toContain('- **Veredito**: 🔴 escalado ao humano');
     expect(review).toContain('limite de 3 ciclos');
   });
 
@@ -510,5 +512,131 @@ describe('review diff', () => {
     expect(t.feedbacks[0]).toContain('1. [T1] A');
     expect(t.feedbacks[0]).toContain('2. [T1] C');
     expect(t.feedbacks[1]).toContain('1. [T2] B');
+  });
+});
+
+describe('renderReview', () => {
+  it('renders a rejected cycle as reprovado with no human block', () => {
+    const cycle: Cycle = {
+      number: 1,
+      verdict: 'rejected',
+      sent: [{ ...item('Sem validação'), bucket: 'act_on' }],
+      answers: [{ fixed: true, text: 'ok' }],
+      noted: [],
+      dismissed: [],
+      previous: [],
+      models: {},
+    };
+    const text = renderReview([cycle], 'rejected', 10);
+    expect(text).toContain('- **Veredito**: reprovado');
+    expect(text).toContain('- **Depende de ação humana**: não');
+    expect(text).not.toContain('🔴');
+    expect(text).toContain('## Ciclo 1: reprovado');
+  });
+});
+
+describe('review document per cycle', () => {
+  it('writes one document per cycle, rejected ones included', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const first = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md'),
+      'utf8',
+    );
+    expect(first).toContain('reprovado');
+    expect(first).toContain('1. Corrigido: ok');
+    const second = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(second).toContain('aprovado');
+  });
+
+  it('does not overwrite the cycle documents when the batch is resumed', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    const failing = async () => {
+      throw new Error('sem atividade');
+    };
+    await expect(reviewBatch(s.ctx, s.batch, s.deps, failing)).rejects.toThrow(
+      'sem atividade',
+    );
+    const file = join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md');
+    const original = await readFile(file, 'utf8');
+    expect(original).toContain('reprovado');
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(await readFile(file, 'utf8')).toBe(original);
+    const resumed = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(resumed).toContain('## Ciclo 2');
+    expect(resumed).toContain(
+      '- **Ciclos realizados**: 1 de 10 nesta tentativa (ciclos 2 a 2 do lote)',
+    );
+    expect(resumed).toContain('reprovado');
+  });
+
+  it('keeps review-lote-N.md as the approved verdict only', async () => {
+    const s = await setup([
+      lead({ act_on: [item('Sem validação')] }),
+      APPROVED,
+    ]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    expect(await readFile(s.reviewPath, 'utf8')).toContain(
+      '**Veredito**: aprovado',
+    );
+    expect(
+      await readFile(join(s.ctx.run.dir, 'review-lote-1-ciclo-1.md'), 'utf8'),
+    ).not.toContain('**Veredito**: aprovado');
+  });
+
+  it('writes the document of the escalated cycle before throwing', async () => {
+    const still = lead({ act_on: [item('Aberto')] });
+    const s = await setup([still, still], 'max_review_cycles: 2');
+    await expect(
+      reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
+    ).rejects.toBeInstanceOf(ReviewEscalation);
+    const last = await readFile(
+      join(s.ctx.run.dir, 'review-lote-1-ciclo-2.md'),
+      'utf8',
+    );
+    expect(last).toContain('escalado ao humano');
+  });
+});
+
+describe('review report: what depends on a person', () => {
+  it('marks the escalation in red and says what to do, in the batch report and in the task document', async () => {
+    const still = lead({ act_on: [{ ...item('Aberto'), task: 'T1' }] });
+    const s = await setup([still, still], 'max_review_cycles: 2');
+    await expect(
+      reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
+    ).rejects.toThrow();
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('## 🔴 DEPENDE DE AÇÃO HUMANA');
+    expect(report).toContain('PRECISA DE VOCÊ');
+    expect(report).toContain('**O que fazer**');
+    expect(report).toContain('- **Depende de ação humana**: 🔴 SIM');
+    const doc = await readFile(
+      join(s.ctx.run.dir, 'tarefas', 'T1', 'review.md'),
+      'utf8',
+    );
+    expect(doc).toContain('🔴 DEPENDE DE AÇÃO HUMANA');
+    expect(doc).toContain('Aberto');
+  });
+
+  it('says plainly that nothing depends on a person when the review is clean', async () => {
+    const s = await setup([APPROVED]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('## ✅ Nada depende de ação humana');
+    expect(report).toContain('- **Depende de ação humana**: não');
+    expect(report).not.toContain('🔴');
   });
 });

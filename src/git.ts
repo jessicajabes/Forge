@@ -51,6 +51,13 @@ export async function isClean(cwd: string): Promise<boolean> {
   return (await git(cwd, ['status', '--porcelain'])) === '';
 }
 
+/** The `git status --short` lines: every change and every untracked file. */
+export async function statusLines(cwd: string): Promise<string[]> {
+  return (await git(cwd, ['status', '--porcelain']))
+    .split('\n')
+    .filter((l) => l.trim() !== '');
+}
+
 export async function branchExists(
   cwd: string,
   name: string,

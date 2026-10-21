@@ -143,3 +143,48 @@ describe('tasks stage on a trivial task', () => {
     expect(fake.calls[1]?.prompt).toContain('inválida');
   });
 });
+
+describe('tasks stage doubts', () => {
+  const WITH_DOUBT = `${TASKS}\n## Dúvidas\n- Qual provedor de e-mail usar?\n`;
+
+  it('calls the Grill for the doubts and writes the tasks again from the updated spec', async () => {
+    const { ctx, fake } = await setup('complete', [WITH_DOUBT, TASKS], {
+      'spec.md': SPEC,
+      'context.md': CONTEXT,
+    });
+    const asked: string[][] = [];
+    await createTasksStage({
+      resolveDoubts: async (c, doubts) => {
+        asked.push(doubts);
+        await writeFile(
+          join(c.run.dir, 'spec.md'),
+          `${SPEC}\n<!-- resolvido -->`,
+        );
+      },
+    })(ctx);
+    expect(asked).toEqual([['Qual provedor de e-mail usar?']]);
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]?.prompt).toContain('<!-- resolvido -->');
+    expect(
+      await readFile(join(ctx.run.dir, 'tasks.md'), 'utf-8'),
+    ).not.toContain('Dúvidas');
+  });
+
+  it('stops asking after two rounds and keeps the doubts for the human stop', async () => {
+    const { ctx } = await setup(
+      'complete',
+      [WITH_DOUBT, WITH_DOUBT, WITH_DOUBT],
+      { 'spec.md': SPEC, 'context.md': CONTEXT },
+    );
+    let rounds = 0;
+    await createTasksStage({
+      resolveDoubts: async () => {
+        rounds++;
+      },
+    })(ctx);
+    expect(rounds).toBe(2);
+    expect(await readFile(join(ctx.run.dir, 'tasks.md'), 'utf-8')).toContain(
+      'Dúvidas',
+    );
+  });
+});

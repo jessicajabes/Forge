@@ -42,6 +42,22 @@ describe('preflight', () => {
     expect(await codeOf(preflight({ cwd, isTTY: true }))).toBe('dirty-tree');
   });
 
+  it('names the dirty files and, for untracked ones, points to `git stash -u`', async () => {
+    const cwd = await makeRepo();
+    await writeFile(join(cwd, 'new.txt'), 'x');
+    const error = await preflight({ cwd, isTTY: true }).catch((e) => e);
+    expect(error.message).toContain('?? new.txt');
+    expect(error.message).toContain('git stash -u');
+
+    const tracked = await makeRepo();
+    await writeFile(join(tracked, 'a.txt'), 'mudou\n');
+    const other = await preflight({ cwd: tracked, isTTY: true }).catch(
+      (e) => e,
+    );
+    expect(other.message).toContain(' M a.txt');
+    expect(other.message).not.toContain('stash -u');
+  });
+
   it('does not count .workflow.yml as a dirty tree', async () => {
     const cwd = await makeRepo();
     await writeFile(join(cwd, '.workflow.yml'), 'review_mode: final\n');

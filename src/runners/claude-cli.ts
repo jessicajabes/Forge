@@ -7,6 +7,7 @@ import {
 } from '../progress.js';
 import {
   RunnerError,
+  RunnerInactivityError,
   RunnerTimeoutError,
   type RunRequest,
   type Runner,
@@ -58,6 +59,8 @@ export type ClaudeCliOptions = {
   editMaxTurns?: number;
   /** Time limit of an editing call (`dev.timeout_minutes`). Not set: no limit. */
   editTimeoutMs?: number;
+  /** Kill the CLI after this long with no stream line (`claude.inactivity_kill_minutes`). Not set: never. */
+  inactivityKillMs?: number;
   /** Called once if ANTHROPIC_API_KEY would replace the login (DESIGN 4.5). */
   notice?: (message: string) => void;
   /** Timers and time source. Default: the real ones. */
@@ -236,7 +239,27 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
       // Restarts the wait: no stream line for 2 minutes, then again every 5.
       const watch = () => {
         cancelWatch();
-        if (!req.onEvent) return;
+        const killMs = opts.inactivityKillMs;
+        const cancelKill =
+          killMs === undefined || killMs <= 0
+            ? () => {}
+            : clock.setTimeout(() => {
+                settled = true;
+                cancelTimer();
+                cancelWatch();
+                child.kill('SIGTERM');
+                reject(
+                  new RunnerInactivityError(
+                    `o claude ficou ${killMs} ms sem atividade e foi encerrado`,
+                    killMs,
+                    stderr,
+                  ),
+                );
+              }, killMs);
+        if (!req.onEvent) {
+          cancelWatch = cancelKill;
+          return;
+        }
         const report = () => {
           warned = true;
           req.onEvent?.({
@@ -252,11 +275,13 @@ export function createClaudeCliRunner(opts: ClaudeCliOptions): Runner {
         cancelWatch = () => {
           cancelFirst();
           cancelRepeat();
+          cancelKill();
         };
       };
+      let cancelTimer = () => {};
       watch();
       const limit = limitFor(req.canEdit);
-      const cancelTimer =
+      cancelTimer =
         limit === undefined
           ? () => {}
           : clock.setTimeout(() => {

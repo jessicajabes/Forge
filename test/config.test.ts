@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ConfigError,
+  DEFAULT_WORKFLOW_YML,
   devBatching,
+  ensureWorkflowFile,
   loadConfig,
   parseConfig,
 } from '../src/config.js';
@@ -14,7 +16,7 @@ describe('config', () => {
   it('uses the defaults when the file is missing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
     const config = await loadConfig(dir);
-    expect(config.review_mode).toBe('per_task');
+    expect(config.review_mode).toBe('final');
     expect(config.max_review_cycles).toBe(10);
     expect(config.dev.arena.candidates).toBe(3);
     expect(config.dev.allowed_commands).toEqual([
@@ -23,6 +25,28 @@ describe('config', () => {
       'npx prettier',
     ]);
     expect(config.claude.isolated).toBe(true);
+  });
+
+  it('keeps the arena off unless dev.arena.enabled is set', () => {
+    expect(parseConfig('').dev.arena.enabled).toBe(false);
+    expect(
+      parseConfig('dev: { arena: { candidates: 2 } }').dev.arena.enabled,
+    ).toBe(false);
+    expect(
+      parseConfig('dev: { arena: { enabled: true } }').dev.arena.enabled,
+    ).toBe(true);
+  });
+
+  it('kills a silent claude after 2 minutes by default, and 0 turns it off', () => {
+    expect(parseConfig('').claude.inactivity_kill_minutes).toBe(2);
+    expect(
+      parseConfig('claude: { inactivity_kill_minutes: 5 }').claude
+        .inactivity_kill_minutes,
+    ).toBe(5);
+    expect(
+      parseConfig('claude: { inactivity_kill_minutes: 0 }').claude
+        .inactivity_kill_minutes,
+    ).toBe(0);
   });
 
   it('defaults max_review_cycles to 10 and honors an explicit value', () => {
@@ -81,7 +105,7 @@ describe('dev.batching and the dev limits', () => {
   });
 
   it('follows review_mode when dev.batching is not set', () => {
-    expect(devBatching(parseConfig(''))).toBe('per_task');
+    expect(devBatching(parseConfig(''))).toBe('all');
     expect(devBatching(parseConfig('review_mode: final'))).toBe('all');
     expect(devBatching(parseConfig('review_mode: per_task'))).toBe('per_task');
   });
@@ -94,9 +118,12 @@ describe('dev.batching and the dev limits', () => {
     expect(devBatching(config)).toBe('per_task');
   });
 
-  it('review_mode defaults to per_task, or final when dev.batching is all', () => {
-    expect(parseConfig('').review_mode).toBe('per_task');
+  it('review_mode defaults to final: one Dev call, the checks, then one review', () => {
+    expect(parseConfig('').review_mode).toBe('final');
     expect(parseConfig('dev: { batching: all }').review_mode).toBe('final');
+    expect(parseConfig('dev: { batching: per_task }').review_mode).toBe(
+      'final',
+    );
   });
 
   it('refuses a per-task review with a single Dev call', () => {
@@ -113,5 +140,47 @@ describe('dev.batching and the dev limits', () => {
       size: 'complete',
     });
     expect(estimate.batches).toBe(4);
+  });
+});
+
+describe('DEFAULT_WORKFLOW_YML', () => {
+  it('passes the schema with the default models, reviewers and arena', () => {
+    const config = parseConfig(DEFAULT_WORKFLOW_YML);
+    expect(config.steps.grill.model).toBe('claude-opus-5-5');
+    expect(config.steps.recon.model).toBe('claude-haiku-5-5');
+    expect(config.steps.tasks.model).toBe('claude-haiku-5-5');
+    expect(config.steps.dev.model).toBe('claude-sonnet-5-5');
+    expect(config.steps.review.model).toBe('claude-opus-5-5');
+    expect(config.steps.review.reviewers).toEqual([
+      { runner: 'claude-cli', model: 'claude-sonnet-5-5' },
+      { runner: 'copilot-cli', model: 'auto' },
+    ]);
+    expect(config.steps.lessons).toEqual({
+      runner: 'claude-cli',
+      model: 'claude-haiku-5-5',
+    });
+    expect(config.dev.arena.enabled).toBe(false);
+    expect(config.dev.arena.candidates).toBe(3);
+    expect(config.dev.arena.judge).toEqual({
+      runner: 'claude-cli',
+      model: 'claude-opus-5-5',
+    });
+  });
+});
+
+describe('ensureWorkflowFile', () => {
+  it('creates .workflow.yml when it is missing and returns true', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
+    expect(await ensureWorkflowFile(dir)).toBe(true);
+    expect(await readFile(join(dir, '.workflow.yml'), 'utf-8')).toBe(
+      DEFAULT_WORKFLOW_YML,
+    );
+  });
+
+  it('never changes an existing file, even an empty one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
+    await writeFile(join(dir, '.workflow.yml'), '');
+    expect(await ensureWorkflowFile(dir)).toBe(false);
+    expect(await readFile(join(dir, '.workflow.yml'), 'utf-8')).toBe('');
   });
 });

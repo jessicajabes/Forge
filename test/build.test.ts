@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -47,6 +47,7 @@ async function setup(yml = '') {
   );
   const config = parseConfig(yml);
   config.dev.arena.candidates = 1; // plain Dev here; the arena has its own tests
+  config.dev.check_commands = []; // the final checks have their own tests below
   const prompts: string[] = [];
   const edits: boolean[] = [];
   let n = 0;
@@ -70,14 +71,18 @@ async function setup(yml = '') {
 
 const stage = (io = createFakeIO([])) =>
   createBuildStage({ io, makeRunner: approvingRunners });
-const commitsAhead = (cwd: string) =>
-  git(cwd, ['rev-list', '--count', 'feature/x..HEAD']);
+// the Forge commits on the branch itself, so count the commits after the initial one
+const commitsAhead = async (cwd: string) =>
+  String(Number(await git(cwd, ['rev-list', '--count', 'HEAD'])) - 1);
 
 describe('build stage', () => {
-  it('works on a branch forge/<slug> and makes one commit for the whole run in final mode', async () => {
+  it('commits on the branch it is on, named in the subject, with one commit for the whole run in final mode', async () => {
     const { ctx, edits } = await setup('review_mode: final');
     await stage()(ctx);
-    expect(await currentBranch(ctx.cwd)).toMatch(/^forge\/[a-z]+-[a-z]+$/);
+    expect(await currentBranch(ctx.cwd)).toBe('feature/x');
+    expect(await git(ctx.cwd, ['log', '-1', '--format=%s'])).toMatch(
+      /^feature\/x - T1, T2, T3 - /,
+    );
     expect(edits).toEqual([true]);
     expect(await commitsAhead(ctx.cwd)).toBe('1');
     const message = await git(ctx.cwd, ['log', '-1', '--format=%B']);
@@ -102,9 +107,27 @@ describe('build stage', () => {
     await stage()(ctx);
     expect(prompts[0]).toContain('- npm test');
     expect(prompts[0]).toContain(join(ctx.run.dir, 'tasks.md'));
-    expect(await readFile(join(ctx.run.dir, 'dev-batch-1.md'), 'utf-8')).toBe(
+    expect(await readFile(join(ctx.run.dir, 'dev-lote-1.md'), 'utf-8')).toBe(
       'relatório 1',
     );
+  });
+
+  it('runs a plain Dev, not the arena, unless dev.arena.enabled is set', async () => {
+    const { ctx, prompts, edits } = await setup('review_mode: final');
+    ctx.config.dev.arena.candidates = 3; // candidates alone do not opt in
+    await stage()(ctx);
+    expect(edits).toEqual([true]);
+    expect(prompts.some((p) => p.includes('preparing an arena'))).toBe(false);
+  });
+
+  it('runs the arena when dev.arena.enabled is set', async () => {
+    const { ctx, prompts, edits } = await setup();
+    ctx.config.dev.arena.enabled = true;
+    ctx.config.dev.arena.candidates = 2;
+    // the fake runner has no valid rubric, so the arena stops right after it starts
+    await expect(stage()(ctx)).rejects.toThrow(/sem resposta válida.*: rubric/);
+    expect(prompts[0]).toContain('preparing an arena');
+    expect(edits).not.toContain(true); // no plain Dev call ran
   });
 
   it('writes review.md at the end', async () => {
@@ -309,4 +332,305 @@ describe('build command progress lines', () => {
     );
     expect(events).toEqual(['step', 'step', 'step', 'step']);
   }, 20_000);
+});
+
+describe('build stage final checks', () => {
+  const FAILING = 'final checks of the project failed';
+
+  async function withCheck(yml = 'review_mode: per_task') {
+    const s = await setup(yml);
+    // passes only once the Dev has written fixed.txt
+    await writeFile(
+      join(s.ctx.cwd, 'check.js'),
+      "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1);\n",
+    );
+    s.ctx.config.dev.check_commands = ['node check.js'];
+    return s;
+  }
+
+  it('runs the checks once at the end, after the last review', async () => {
+    const { ctx, prompts } = await withCheck();
+    await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+    const io = createFakeIO([]);
+    await stage(io)(ctx);
+    expect(io.output()).toContain('Checks finais passaram.');
+    expect(prompts.some((p) => p.includes(FAILING))).toBe(false);
+  }, 30_000);
+
+  it('sends a failing check back to the Dev, then commits the fix', async () => {
+    const { ctx, prompts } = await withCheck();
+    const inner = ctx.runner;
+    ctx.runner = async (req) => {
+      if (req.prompt.includes(FAILING))
+        await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+      return inner(req);
+    };
+    await stage()(ctx);
+    const fix = prompts.filter((p) => p.includes(FAILING));
+    expect(fix).toHaveLength(1);
+    expect(fix[0]).toContain('`node check.js`: falhou');
+    const log = await git(ctx.cwd, ['log', '--format=%s']);
+    expect(log).toContain('feature/x - correções dos checks finais');
+  }, 30_000);
+
+  it('reviews the Dev fix of a failing check before committing it', async () => {
+    const { ctx } = await withCheck();
+    const inner = ctx.runner;
+    ctx.runner = async (req) => {
+      if (req.prompt.includes(FAILING))
+        await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+      return inner(req);
+    };
+    const reviewerDiffs: string[] = [];
+    const makeRunner: RunnerFactory = (o) => async (req) => {
+      if (req.prompt.includes('adversarial code reviewer'))
+        reviewerDiffs.push(req.prompt);
+      return approvingRunners(o)(req);
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(ctx);
+    // the 3 batches, then the fix of the check
+    expect(reviewerDiffs.length).toBeGreaterThan(3);
+    expect(reviewerDiffs.at(-1)).toContain('fixed.txt');
+    expect(await readFile(join(ctx.run.dir, 'review.md'), 'utf-8')).toContain(
+      '## Correções dos checks finais',
+    );
+    expect(await git(ctx.cwd, ['status', '--porcelain'])).toBe('');
+  }, 30_000);
+
+  it('stops the run when the checks still fail after the Dev fixes', async () => {
+    const { ctx, prompts } = await withCheck();
+    await expect(stage()(ctx)).rejects.toThrow(
+      /checks finais ainda falham.*node check\.js/s,
+    );
+    expect(prompts.filter((p) => p.includes(FAILING))).toHaveLength(2);
+  }, 30_000);
+
+  it('runs a counting check exactly once across three per_task batches', async () => {
+    const { ctx } = await setup('review_mode: per_task');
+    await writeFile(
+      join(ctx.cwd, 'count.js'),
+      "require('fs').appendFileSync('runs.txt', 'x');\n",
+    );
+    ctx.config.dev.check_commands = ['node count.js'];
+    await stage()(ctx);
+    expect(await readFile(join(ctx.cwd, 'runs.txt'), 'utf-8')).toBe('x');
+  }, 30_000);
+
+  it('commits what an earlier stop left in the tree when the checks pass on resume', async () => {
+    const { ctx } = await withCheck();
+    await expect(stage()(ctx)).rejects.toThrow(/checks finais ainda falham/);
+    // a person fixes it by hand and runs again
+    await writeFile(join(ctx.cwd, 'fixed.txt'), 'x');
+    await stage()(ctx);
+    expect(await git(ctx.cwd, ['status', '--porcelain'])).toBe('');
+    expect(await git(ctx.cwd, ['log', '--format=%s'])).toContain(
+      'feature/x - correções dos checks finais',
+    );
+  }, 30_000);
+
+  it('does nothing when there are no check commands', async () => {
+    const { ctx } = await setup();
+    const io = createFakeIO([]);
+    await stage(io)(ctx);
+    expect(io.output()).not.toContain('Checks finais');
+  });
+});
+
+describe('build stage in the single-Dev flow', () => {
+  it('runs the checks before the review, and files the documents by task', async () => {
+    const s = await setup('review_mode: final');
+    await writeFile(
+      join(s.ctx.cwd, 'check.js'),
+      "require('fs').appendFileSync('order.log', 'check\\n');\n",
+    );
+    s.ctx.config.dev.check_commands = ['node check.js'];
+    const order: string[] = [];
+    const makeRunner: RunnerFactory = () => async (req) => {
+      if (req.prompt.includes('adversarial code reviewer')) {
+        order.push('review');
+        return '## Findings\n\nno findings';
+      }
+      return APPROVED;
+    };
+    const inner = s.ctx.runner;
+    s.ctx.runner = async (req) => {
+      order.push('dev');
+      return inner(req);
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx);
+    expect(order[0]).toBe('dev');
+    expect(order).toContain('review');
+    expect(
+      await readFile(join(s.ctx.cwd, 'order.log'), 'utf-8').catch(() => ''),
+    ).toBe('check\n');
+    // the single Dev call is one batch, filed per task
+    for (const id of [1, 2, 3]) {
+      const dev = await readFile(
+        join(s.ctx.run.dir, 'tarefas', `T${id}`, 'dev.md'),
+        'utf-8',
+      );
+      expect(dev).toContain(`T${id}`);
+    }
+  }, 30_000);
+
+  it('files the Dev report sections under the task each one names', async () => {
+    const s = await setup('review_mode: final');
+    s.ctx.runner = async () =>
+      '## T1: Tarefa 1\n- **Feito**: um\n\n## T2: Tarefa 2\n- **Feito**: dois\n';
+    await stage()(s.ctx);
+    const t2 = await readFile(
+      join(s.ctx.run.dir, 'tarefas', 'T2', 'dev.md'),
+      'utf-8',
+    );
+    expect(t2).toContain('dois');
+    expect(t2).not.toContain('um');
+  });
+
+  it('a resumed run does not redo the Dev when only the review was interrupted', async () => {
+    const s = await setup('review_mode: final');
+    let reviewing = true;
+    const makeRunner: RunnerFactory = () => async (req) => {
+      if (reviewing) throw new Error('queda no review');
+      return req.prompt.includes('adversarial code reviewer')
+        ? '## Findings\n\nno findings'
+        : APPROVED;
+    };
+    await expect(
+      createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx),
+    ).rejects.toThrow();
+    expect(s.edits).toEqual([true]); // the Dev ran once
+
+    reviewing = false;
+    const io = createFakeIO([]);
+    await createBuildStage({ io, makeRunner })(s.ctx);
+    expect(s.edits).toEqual([true]); // and not again
+    expect(io.output()).toContain('o Dev já tinha terminado');
+    expect(await commitsAhead(s.ctx.cwd)).toBe('1');
+  }, 30_000);
+
+  it('a resumed run does not redo the review that was already approved', async () => {
+    const s = await setup('review_mode: final');
+    const calls: string[] = [];
+    const makeRunner: RunnerFactory = () => async (req) => {
+      calls.push(req.prompt.slice(0, 20));
+      return req.prompt.includes('adversarial code reviewer')
+        ? '## Findings\n\nno findings'
+        : APPROVED;
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx);
+    const first = calls.length;
+    // go back as if the run stopped right before the commit
+    await git(s.ctx.cwd, ['reset', '--soft', 'HEAD~1']);
+    await git(s.ctx.cwd, ['reset']);
+    const io = createFakeIO([]);
+    await createBuildStage({ io, makeRunner })(s.ctx);
+    expect(calls.length).toBe(first);
+    expect(io.output()).toContain('a revisão já tinha sido aprovada');
+  }, 30_000);
+
+  it('resumes a batch approved after a rejected cycle without reviewing it again', async () => {
+    const s = await setup('review_mode: final');
+    const calls: string[] = [];
+    let leads = 0;
+    const makeRunner: RunnerFactory = () => async (req) => {
+      calls.push(req.prompt.slice(0, 20));
+      if (req.prompt.includes('adversarial code reviewer'))
+        return '## Findings\n\nachado';
+      if (req.canEdit) {
+        await writeFile(join(s.ctx.cwd, 'fix.txt'), 'x');
+        return '1. Corrigido: ok';
+      }
+      return leads++ === 0
+        ? JSON.stringify({
+            verdict: 'rejected',
+            act_on: [
+              {
+                task: 'T1',
+                title: 'Falta algo',
+                description: 'falta algo',
+                raised_by: ['A'],
+              },
+            ],
+          })
+        : APPROVED;
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx);
+    const dir = s.ctx.run.dir;
+    const cycle1 = await readFile(
+      join(dir, 'review-lote-1-ciclo-1.md'),
+      'utf8',
+    );
+    expect(cycle1).toContain('**Veredito**: reprovado');
+    expect(await readFile(join(dir, 'review-lote-1.md'), 'utf8')).toContain(
+      '**Veredito**: aprovado',
+    );
+    // review.md joins review-lote-N.md only, never the per-cycle files
+    const review = await readFile(join(dir, 'review.md'), 'utf8');
+    expect(review).not.toContain('**Veredito**: reprovado');
+
+    const first = calls.length;
+    // as if the run stopped right before the commit, with no record in build.json
+    const statePath = join(dir, 'build.json');
+    const state = JSON.parse(await readFile(statePath, 'utf8'));
+    await writeFile(
+      statePath,
+      JSON.stringify({ ...state, reviewedBatches: [] }),
+    );
+    await git(s.ctx.cwd, ['reset', '--soft', 'HEAD~1']);
+    await git(s.ctx.cwd, ['reset']);
+    const io = createFakeIO([]);
+    await createBuildStage({ io, makeRunner })(s.ctx);
+    expect(calls.length).toBe(first);
+    expect(io.output()).toContain('a revisão já tinha sido aprovada');
+  }, 30_000);
+
+  it('reviews the Dev fix of a check that failed after the review changed code', async () => {
+    const s = await setup('review_mode: final');
+    await writeFile(
+      join(s.ctx.cwd, 'check.js'),
+      "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1);\n",
+    );
+    s.ctx.config.dev.check_commands = ['node check.js'];
+    const FAILING = 'final checks of the project failed';
+    const inner = s.ctx.runner;
+    s.ctx.runner = async (req) => {
+      // the first Dev call passes the checks; a review fix breaks them; the check fix repairs them
+      if (!req.prompt.includes('reviewer sent these items back'))
+        await writeFile(join(s.ctx.cwd, 'fixed.txt'), 'x');
+      if (req.prompt.includes('reviewer sent these items back'))
+        await rm(join(s.ctx.cwd, 'fixed.txt'), { force: true });
+      if (req.prompt.includes(FAILING))
+        await writeFile(join(s.ctx.cwd, 'fixed.txt'), 'x');
+      return inner(req);
+    };
+    let leads = 0;
+    let reviewers = 0;
+    const finding = {
+      task: 'T1',
+      title: 'Falta validar',
+      description: 'sem validação',
+      raised_by: ['A'],
+      rationale: 'importa',
+    };
+    const makeRunner: RunnerFactory = () => async (req) => {
+      if (req.prompt.includes('adversarial code reviewer')) {
+        reviewers++;
+        return '## Findings\n\nno findings';
+      }
+      return ++leads === 1
+        ? JSON.stringify({
+            verdict: 'rejected',
+            act_on: [finding],
+            consider: [],
+            noted: [],
+            dismissed: [],
+          })
+        : APPROVED;
+    };
+    await createBuildStage({ io: createFakeIO([]), makeRunner })(s.ctx);
+    // cycle 1 (rejected), cycle 2 (approved), then one more review for the check fix
+    expect(reviewers).toBe(3);
+    const review = await readFile(join(s.ctx.run.dir, 'review.md'), 'utf-8');
+    expect(review).toContain('## Correções dos checks finais');
+  }, 60_000);
 });

@@ -467,18 +467,10 @@ Nenhum candidato mudou nada: ${cfg.candidates} candidatos rodaram sem erro e a t
       );
     }
 
-    // 5. Verify the result with the project's own commands. The worktrees go first: they
-    // sit inside the project, so lint and the tests would read every copy of the code.
+    // 5. The worktrees go first: they sit inside the project, so the final checks of the build
+    // would read every copy of the code. The checks run once, at the end of the run.
     await removeWorktrees();
-    const checks = await runChecks(
-      ctx.cwd,
-      ctx.config.dev.check_commands,
-      ctx.reporter,
-    );
-    const checksText =
-      checks.length === 0
-        ? 'nenhum comando para verificar'
-        : checks.map((c) => `- \`${c.command}\`: ${c.detail}`).join('\n');
+    const checksText = 'checks no fim da run';
 
     // 6. Note.
     const note = `# Arena - lote ${batch.index} de ${batch.total}
