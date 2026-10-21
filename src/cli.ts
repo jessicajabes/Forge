@@ -13,6 +13,7 @@ import {
 import { SubagentEscalation, labelRunner, originLabel } from './subagents.js';
 import {
   devBatching,
+  ensureWorkflowFile,
   loadConfig,
   type Config,
   type RunnerName,
@@ -333,6 +334,9 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     release = pre.release;
     if (pre.excluded.length > 0)
       io.write(`Adicionei ${pre.excluded.join(' e ')} ao .git/info/exclude.`);
+
+    if (await ensureWorkflowFile(cwd))
+      io.write('Criei .workflow.yml com o workflow padrão.');
 
     const config = await loadConfig(cwd);
     resolveArenaMode(config, 'complete', {

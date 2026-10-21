@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ConfigError,
+  DEFAULT_WORKFLOW_YML,
   devBatching,
+  ensureWorkflowFile,
   loadConfig,
   parseConfig,
 } from '../src/config.js';
@@ -138,5 +140,47 @@ describe('dev.batching and the dev limits', () => {
       size: 'complete',
     });
     expect(estimate.batches).toBe(4);
+  });
+});
+
+describe('DEFAULT_WORKFLOW_YML', () => {
+  it('passes the schema with the default models, reviewers and arena', () => {
+    const config = parseConfig(DEFAULT_WORKFLOW_YML);
+    expect(config.steps.grill.model).toBe('claude-opus-5-5');
+    expect(config.steps.recon.model).toBe('claude-haiku-5-5');
+    expect(config.steps.tasks.model).toBe('claude-haiku-5-5');
+    expect(config.steps.dev.model).toBe('claude-sonnet-5-5');
+    expect(config.steps.review.model).toBe('claude-opus-5-5');
+    expect(config.steps.review.reviewers).toEqual([
+      { runner: 'claude-cli', model: 'claude-sonnet-5-5' },
+      { runner: 'copilot-cli', model: 'auto' },
+    ]);
+    expect(config.steps.lessons).toEqual({
+      runner: 'claude-cli',
+      model: 'claude-haiku-5-5',
+    });
+    expect(config.dev.arena.enabled).toBe(false);
+    expect(config.dev.arena.candidates).toBe(3);
+    expect(config.dev.arena.judge).toEqual({
+      runner: 'claude-cli',
+      model: 'claude-opus-5-5',
+    });
+  });
+});
+
+describe('ensureWorkflowFile', () => {
+  it('creates .workflow.yml when it is missing and returns true', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
+    expect(await ensureWorkflowFile(dir)).toBe(true);
+    expect(await readFile(join(dir, '.workflow.yml'), 'utf-8')).toBe(
+      DEFAULT_WORKFLOW_YML,
+    );
+  });
+
+  it('never changes an existing file, even an empty one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
+    await writeFile(join(dir, '.workflow.yml'), '');
+    expect(await ensureWorkflowFile(dir)).toBe(false);
+    expect(await readFile(join(dir, '.workflow.yml'), 'utf-8')).toBe('');
   });
 });

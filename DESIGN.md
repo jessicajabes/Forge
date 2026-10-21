@@ -87,6 +87,8 @@ meu-app/
 
 Na primeira execução, o Forge acrescenta `.workflow/` e `.workflow.yml` ao `.git/info/exclude` (o "gitignore local"), sem duplicar e avisando em uma linha. O `.gitignore` do projeto nunca é alterado.
 
+Na primeira execução, se o `.workflow.yml` não existir, o Forge cria o arquivo com o workflow padrão e avisa em uma linha; um arquivo que já existe nunca é alterado.
+
 ## 4. Decisões de arquitetura
 
 ### 4.1 Artefatos entre etapas

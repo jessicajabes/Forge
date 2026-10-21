@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { UsageError, main, parseFlags, type CliDeps } from '../src/cli.js';
-import type { Config } from '../src/config.js';
+import { DEFAULT_WORKFLOW_YML, type Config } from '../src/config.js';
 import { git } from '../src/git.js';
 import type { RunnerFactory } from '../src/runner.js';
 import { findIncompleteRun } from '../src/state.js';
@@ -367,6 +367,24 @@ describe('forge-jj', () => {
     );
     expect(io.output()).toContain('Execução cancelada');
     expect(s.calls).not.toContain('dev');
+  });
+
+  it('creates the default .workflow.yml before loading the config, and never rewrites it', async () => {
+    const { d, cwd, io, s } = await deps(['cancelar', 'cancelar']);
+    const file = join(cwd, '.workflow.yml');
+    await rm(file);
+    const argv = ['x', '--size', 'trivial', '--review', 'final'];
+    expect(await main(argv, d)).toBe(0);
+    const created = await readFile(file, 'utf8');
+    expect(created).toBe(DEFAULT_WORKFLOW_YML);
+    expect(io.output()).toContain('Criei .workflow.yml com o workflow padrão.');
+    expect(s.configs[0]?.steps.dev.model).toBe('claude-sonnet-5-5');
+    expect(await git(cwd, ['status', '--porcelain'])).toBe('');
+
+    const before = io.output().split('Criei .workflow.yml').length;
+    expect(await main(argv, d)).toBe(0);
+    expect(io.output().split('Criei .workflow.yml').length).toBe(before);
+    expect(await readFile(file, 'utf8')).toBe(created);
   });
 
   it('never leaves the repo lock behind', async () => {

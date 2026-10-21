@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -154,6 +154,53 @@ export function parseConfig(text: string): Config {
     throw new ConfigError(`.workflow.yml inválido: ${problems.join('; ')}`);
   }
   return result.data;
+}
+
+/** Workflow written to a repo that has no `.workflow.yml`. The arena stays opt-in (no `enabled`). */
+export const DEFAULT_WORKFLOW_YML = `steps:
+  grill:
+    runner: claude-cli
+    model: claude-opus-5-5
+  recon:
+    runner: claude-cli
+    model: claude-haiku-5-5
+  tasks:
+    runner: claude-cli
+    model: claude-haiku-5-5
+  dev:
+    runner: claude-cli
+    model: claude-sonnet-5-5
+  review:
+    runner: claude-cli
+    model: claude-opus-5-5
+    reviewers:
+      - runner: claude-cli
+        model: claude-sonnet-5-5
+      - runner: copilot-cli
+        model: auto
+  lessons:
+    runner: claude-cli
+    model: claude-haiku-5-5
+dev:
+  arena:
+    candidates: 3
+    judge:
+      runner: claude-cli
+      model: claude-opus-5-5
+`;
+
+/** Writes `DEFAULT_WORKFLOW_YML` only when `.workflow.yml` is missing; returns whether it created it. */
+export async function ensureWorkflowFile(cwd: string): Promise<boolean> {
+  try {
+    await writeFile(join(cwd, '.workflow.yml'), DEFAULT_WORKFLOW_YML, {
+      encoding: 'utf-8',
+      flag: 'wx',
+    });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
 }
 
 /** Loads `.workflow.yml` from the target repo; a missing file means all defaults. */
