@@ -14,7 +14,7 @@ describe('config', () => {
   it('uses the defaults when the file is missing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'forge-cfg-'));
     const config = await loadConfig(dir);
-    expect(config.review_mode).toBe('per_task');
+    expect(config.review_mode).toBe('final');
     expect(config.max_review_cycles).toBe(10);
     expect(config.dev.arena.candidates).toBe(3);
     expect(config.dev.allowed_commands).toEqual([
@@ -91,7 +91,7 @@ describe('dev.batching and the dev limits', () => {
   });
 
   it('follows review_mode when dev.batching is not set', () => {
-    expect(devBatching(parseConfig(''))).toBe('per_task');
+    expect(devBatching(parseConfig(''))).toBe('all');
     expect(devBatching(parseConfig('review_mode: final'))).toBe('all');
     expect(devBatching(parseConfig('review_mode: per_task'))).toBe('per_task');
   });
@@ -104,9 +104,12 @@ describe('dev.batching and the dev limits', () => {
     expect(devBatching(config)).toBe('per_task');
   });
 
-  it('review_mode defaults to per_task, or final when dev.batching is all', () => {
-    expect(parseConfig('').review_mode).toBe('per_task');
+  it('review_mode defaults to final: one Dev call, the checks, then one review', () => {
+    expect(parseConfig('').review_mode).toBe('final');
     expect(parseConfig('dev: { batching: all }').review_mode).toBe('final');
+    expect(parseConfig('dev: { batching: per_task }').review_mode).toBe(
+      'final',
+    );
   });
 
   it('refuses a per-task review with a single Dev call', () => {

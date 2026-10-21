@@ -52,7 +52,7 @@ const configSchema = z
         lessons: { runner: 'claude-cli' },
         review: { runner: 'claude-cli', reviewers: [] },
       }),
-    // Not set: resolved after the parse (per_task, or final when dev.batching is all)
+    // Not set: resolved after the parse (final, or per_task when dev.batching is per_task and nothing says otherwise)
     review_mode: z.enum(['final', 'per_task']).optional(),
     max_review_cycles: z.number().int().positive().default(10),
     max_lessons: z.number().int().positive().default(30),
@@ -115,9 +115,8 @@ const configSchema = z
   })
   .transform((c) => ({
     ...c,
-    // Implicit default: per_task, unless the config already batches everything
-    review_mode:
-      c.review_mode ?? (c.dev.batching === 'all' ? 'final' : 'per_task'),
+    // Implicit default: final (one Dev call for every task, then the checks, then one review)
+    review_mode: c.review_mode ?? 'final',
   }));
 
 export type Config = z.infer<typeof configSchema>;

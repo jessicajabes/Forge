@@ -77,7 +77,7 @@ Every criterion must be checkable by a command or an observable behavior: a targ
 
 - Use only commands found in `context.md` or in the repo. Never invent a command. If the project has no way to check the behavior, say so in the task, and write the criterion as an observable behavior.
 - Each task carries only the criteria for its own behavior. A task that changes behavior includes a criterion for the new or updated test of that behavior.
-- A test criterion runs only the task's own test file or filter (for example `npm test -- <path>`), using a command that is in `dev.allowed_commands`. If no allowed command can run a single file, say so under `## Dúvidas` instead of requiring the full suite.
+- A test criterion runs only the task's own test file or filter (for example `npm test -- <path>`), using a command that is in `dev.allowed_commands`. If no allowed command can run a single file, say so in the task and write the criterion as an observable behavior, instead of requiring the full suite. (`## Dúvidas` is only for decisions a person must make.)
 - Do not add formatting (`prettier`), full test-suite, or lint criteria to any task. They are global checks, not part of a task's own behavior, and are left out of `tasks.md`. This applies to both `per_task` and final review modes.
 
 ## Output format
@@ -109,7 +109,7 @@ Rules for the format:
 - Do not add a task for anything under "Fora do escopo".
 - Cover every decision in `Decisões` that needs a change in the code. A decision with no task is a gap; flag it.
 - If `Pontos em aberto` still has items that affect a task, say in that task which open point it waits on. Do not guess the answer.
-- If you cannot break the work into tasks without a missing decision, say what is missing at the end under `## Dúvidas` as a short list. The Forge shows it at the human stop.
+- If you cannot break the work into tasks without a missing decision, say what is missing at the end under `## Dúvidas` as a short list. Put there only what a person must decide: the Forge sends each doubt to the Grill right away, the person answers, and you are asked to write the tasks again with the answers in `spec.md`. Do not list doubts you can settle by reading the code, and do not leave a pending point in a task instead of in `## Dúvidas`.
 
 ## Common mistakes
 

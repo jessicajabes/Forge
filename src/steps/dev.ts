@@ -15,6 +15,7 @@ import type { RunContext } from '../orchestrator.js';
 import { workflowDir, type Run } from '../runs.js';
 import { loadSkill } from '../skills.js';
 import { saveArtifact } from '../artifacts.js';
+import { writeDevTaskDocs } from '../taskDocs.js';
 
 export type Batch = { index: number; total: number; tasks: Task[] };
 
@@ -125,7 +126,11 @@ export function buildDevPrompt(i: DevInputs): string {
 
 ## Batch ${i.batch.index} of ${i.batch.total}
 
-Implement only these tasks, in order.
+Implement only these tasks, in order.${
+    i.batch.total > 1
+      ? ' The other tasks of the plan come in later batches: do not read ahead, and do not implement or prepare anything for them.'
+      : ''
+  }
 
 ${i.batchMarkdown}
 
@@ -192,11 +197,11 @@ export async function runDevBatch(
     ...(opts.feedback ? { feedback: opts.feedback } : {}),
   });
   const report = await ctx.runner({ prompt, files: [], canEdit: true });
-  await saveArtifact(
-    join(ctx.run.dir, opts.reportName ?? `dev-batch-${batch.index}.md`),
-    report,
-    () => undefined,
-  );
+  const reportName = opts.reportName ?? `dev-lote-${batch.index}.md`;
+  await saveArtifact(join(ctx.run.dir, reportName), report, () => undefined);
+  // A correction report answers numbered items; only the Dev's own report is filed by task
+  if (!opts.feedback)
+    await writeDevTaskDocs(ctx.run.dir, batch.tasks, report, reportName);
   return report;
 }
 

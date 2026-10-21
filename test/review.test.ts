@@ -115,7 +115,7 @@ async function setup(leads: string[], yml = '') {
     reviewerPrompts,
     leadPrompts,
     reviewerModels,
-    reviewPath: join(run.dir, 'review-batch-1.md'),
+    reviewPath: join(run.dir, 'review-lote-1.md'),
   };
 }
 
@@ -247,7 +247,7 @@ describe('reviewBatch', () => {
     ).rejects.toBeInstanceOf(ReviewEscalation);
     expect(s.feedbacks).toHaveLength(2);
     const review = await readFile(s.reviewPath, 'utf-8');
-    expect(review).toContain('- **Veredito**: escalado ao humano');
+    expect(review).toContain('- **Veredito**: 🔴 escalado ao humano');
     expect(review).toContain('limite de 3 ciclos');
   });
 
@@ -510,5 +510,35 @@ describe('review diff', () => {
     expect(t.feedbacks[0]).toContain('1. [T1] A');
     expect(t.feedbacks[0]).toContain('2. [T1] C');
     expect(t.feedbacks[1]).toContain('1. [T2] B');
+  });
+});
+
+describe('review report: what depends on a person', () => {
+  it('marks the escalation in red and says what to do, in the batch report and in the task document', async () => {
+    const still = lead({ act_on: [{ ...item('Aberto'), task: 'T1' }] });
+    const s = await setup([still, still], 'max_review_cycles: 2');
+    await expect(
+      reviewBatch(s.ctx, s.batch, s.deps, s.devFix),
+    ).rejects.toThrow();
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('## 🔴 DEPENDE DE AÇÃO HUMANA');
+    expect(report).toContain('PRECISA DE VOCÊ');
+    expect(report).toContain('**O que fazer**');
+    expect(report).toContain('- **Depende de ação humana**: 🔴 SIM');
+    const doc = await readFile(
+      join(s.ctx.run.dir, 'tarefas', 'T1', 'review.md'),
+      'utf8',
+    );
+    expect(doc).toContain('🔴 DEPENDE DE AÇÃO HUMANA');
+    expect(doc).toContain('Aberto');
+  });
+
+  it('says plainly that nothing depends on a person when the review is clean', async () => {
+    const s = await setup([APPROVED]);
+    await reviewBatch(s.ctx, s.batch, s.deps, s.devFix);
+    const report = await readFile(s.reviewPath, 'utf8');
+    expect(report).toContain('## ✅ Nada depende de ação humana');
+    expect(report).toContain('- **Depende de ação humana**: não');
+    expect(report).not.toContain('🔴');
   });
 });

@@ -1,3 +1,4 @@
+import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { ArenaEscalation } from './arena.js';
 import { resolveArenaMode } from './arenaMode.js';
@@ -10,7 +11,12 @@ import {
   type ProgressReporterOptions,
 } from './progressReporter.js';
 import { SubagentEscalation, labelRunner, originLabel } from './subagents.js';
-import { loadConfig, type Config, type RunnerName } from './config.js';
+import {
+  devBatching,
+  loadConfig,
+  type Config,
+  type RunnerName,
+} from './config.js';
 import type { IO } from './io.js';
 import {
   runWorkflow,
@@ -153,6 +159,55 @@ async function askChoices(
   return { size, review };
 }
 
+/** What the questions of a run settled besides the size, kept so a resumed run uses the same ones. */
+type DevChoices = {
+  review_mode: 'final' | 'per_task';
+  arena: boolean;
+  batching: 'per_task' | 'all';
+};
+
+/**
+ * The question about the arena (DESIGN 4.14). Flags and a trivial task skip it. With the review
+ * at the end the arena may judge the whole result once or each task on its own; with a review per
+ * task every task has its own Dev anyway, so the only question is whether to use the arena.
+ */
+async function askDevMode(
+  io: IO,
+  flags: Flags,
+  config: Config,
+  size: TaskSize,
+): Promise<void> {
+  if (flags.arena !== undefined || flags.noArena || size === 'trivial') return;
+  const n = config.dev.arena.candidates;
+  const perTask = config.review_mode === 'per_task';
+  const current = config.dev.arena.enabled
+    ? devBatching(config) === 'per_task'
+      ? 3
+      : 2
+    : 1;
+  const mark = (i: number) => (i === current ? ' (padrão)' : '');
+  if (perTask) {
+    io.write(
+      `Como rodar o Dev?\n  1) simples: um Dev por tarefa${mark(1)}\n  2) arena: cada tarefa tem ${n} candidatos e um juiz (custa várias vezes mais)${mark(2) || mark(3)}`,
+    );
+    const answer = (await io.ask('> ')).trim();
+    config.dev.arena.enabled =
+      answer === '2' || (answer === '' && current !== 1);
+    return;
+  }
+  io.write(
+    `Como rodar o Dev?\n  1) simples: um Dev implementa todas as tarefas${mark(1)}\n  2) arena, uma vez: ${n} candidatos fazem todas as tarefas e o juiz compara o resultado inteiro${mark(2)}\n  3) arena por tarefa: cada tarefa tem ${n} candidatos e um juiz, e é commitada antes da próxima (custa mais)${mark(3)}`,
+  );
+  const raw = (await io.ask('> ')).trim();
+  const choice =
+    raw === '1' || raw === '2' || raw === '3' ? Number(raw) : current;
+  config.dev.arena.enabled = choice !== 1;
+  if (choice === 3) config.dev.batching = 'per_task';
+  else if (choice === 2) config.dev.batching = 'all';
+}
+
+const choicesPath = (runDir: string) => join(runDir, 'choices.json');
+
 /** Each stage gets the runner of its own `steps.<stage>` entry, without copying the context. */
 function withRunner(
   stageName: string,
@@ -203,15 +258,40 @@ export function buildStages(opts: {
       runner: c.steps[name].runner,
       model: c.steps[name].model,
     });
+  const grill = withRunner(
+    'grill',
+    createGrillStage({ io }),
+    step('grill'),
+    make,
+  );
+  // Doubts the tasks cannot settle go straight to the Grill, with the spec so far, so the
+  // interview settles only them and keeps the decisions already made.
+  const resolveDoubts = async (ctx: RunContext, doubts: string[]) => {
+    const spec = await readFile(join(ctx.run.dir, 'spec.md'), 'utf-8').catch(
+      () => '',
+    );
+    io.write(
+      `As tarefas deixaram ${doubts.length} dúvida(s) que dependem de você. Chamando o Grill:\n${doubts.map((d) => `- ${d}`).join('\n')}`,
+    );
+    await grill({
+      ...ctx,
+      task: `${ctx.task}\n\nAs tarefas não puderam ser escritas por causa das dúvidas abaixo. Pergunte só sobre elas e mantenha as decisões do spec atual.\n\n## Dúvidas\n${doubts.map((d) => `- ${d}`).join('\n')}\n\n## Spec atual\n${spec || '(sem spec)'}`,
+    });
+  };
   return {
-    grill: withRunner('grill', createGrillStage({ io }), step('grill'), make),
+    grill,
     recon: withRunner(
       'recon',
       createReconStage({ io, refreshContext: opts.refreshContext }),
       step('recon'),
       make,
     ),
-    tasks: withRunner('tasks', createTasksStage(), step('tasks'), make),
+    tasks: withRunner(
+      'tasks',
+      createTasksStage({ resolveDoubts }),
+      step('tasks'),
+      make,
+    ),
     approve: createHumanStop(io, opts.openEditor),
     build: withRunner(
       'dev',
@@ -282,11 +362,29 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
       ({ task, size } = found.state);
       run = found.run;
       io.write(`Retomando: "${task}" (${found.run.id}).`);
+      // the answers of the first attempt win over the file, so the run goes on as it started
+      try {
+        const saved = JSON.parse(
+          await readFile(choicesPath(run.dir), 'utf-8'),
+        ) as DevChoices;
+        config.review_mode = saved.review_mode;
+        config.dev.arena.enabled = saved.arena;
+        config.dev.batching = saved.batching;
+      } catch {
+        // a run from before the answers were saved: the config decides
+      }
     } else {
       const choices = await askChoices(io, flags, config);
       size = choices.size;
       config.review_mode = choices.review;
+      await askDevMode(io, flags, config, size);
       run = await createRun(cwd, task);
+      const saved: DevChoices = {
+        review_mode: config.review_mode,
+        arena: config.dev.arena.enabled,
+        batching: devBatching(config),
+      };
+      await writeFile(choicesPath(run.dir), JSON.stringify(saved, null, 2));
     }
 
     const make = logCalls(

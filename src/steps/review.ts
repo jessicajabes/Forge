@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { z } from 'zod';
-import { parseSpec, saveArtifact } from '../artifacts.js';
+import { parseSpec, saveArtifact, type Task } from '../artifacts.js';
 import { workingDiff, workingDiffStat } from '../git.js';
 import type { IO } from '../io.js';
 import type { RunContext } from '../orchestrator.js';
 import type { Runner, RunnerFactory } from '../runner.js';
 import { readReference, loadSkill } from '../skills.js';
 import { assertAllOk, runSubagents } from '../subagents.js';
+import { taskDocPath } from '../taskDocs.js';
 import { gatherInputs, type Batch } from './dev.js';
 
 // ---------- what the lead returns (skills/review) ----------
@@ -124,6 +125,42 @@ const label = (i: number) => String.fromCharCode(65 + i);
 const line = (i: Item) =>
   `${i.task ? `[${i.task}] ` : ''}${i.title}: ${i.description}`;
 
+/** The items nobody can settle but a person: what the run escalated, or approved at the cycle limit. */
+function humanItems(
+  cycles: Cycle[],
+  status: 'approved' | 'escalated',
+  leftover: Item[],
+): Item[] {
+  return status === 'escalated' ? (cycles.at(-1)?.sent ?? []) : leftover;
+}
+
+const HUMAN_TITLE = '## 🔴 DEPENDE DE AÇÃO HUMANA';
+const NO_HUMAN = '## ✅ Nada depende de ação humana';
+
+/** The red block: what needs a person, why, and what the person does about it. */
+function renderHuman(
+  items: Item[],
+  status: 'approved' | 'escalated',
+  reason?: string,
+  heading = HUMAN_TITLE,
+): string {
+  if (status === 'approved' && items.length === 0) return `${NO_HUMAN}\n`;
+  const todo =
+    status === 'escalated'
+      ? 'Decida: corrigir o item à mão ou aceitá-lo. Depois retome a execução.'
+      : 'Decida: aceitar o item como está ou criar uma task nova para ele.';
+  const why =
+    status === 'escalated'
+      ? `A revisão parou e **não vai continuar sozinha**.${reason ? ` Motivo: ${reason}.` : ''}`
+      : 'A revisão foi aprovada no limite de ciclos, mas estes itens ficaram em aberto e **ninguém vai tratá-los sozinho**.';
+  return `${heading}
+> 🔴 **PRECISA DE VOCÊ.** ${why}
+> 🔴 **O que fazer**: ${todo}
+
+${items.map((i, n) => `${n + 1}. 🔴 ${line(i)}`).join('\n')}
+`;
+}
+
 function renderReview(
   cycles: Cycle[],
   status: 'approved' | 'escalated',
@@ -136,12 +173,19 @@ function renderReview(
     leftover.length > 0
       ? `\n- **Aprovado no limite de ciclos**: ${leftover.length} ${leftover.length === 1 ? 'item' : 'itens'} \`consider\` ficaram em aberto e foram anotados, sem voltar ao Dev: ${leftover.map((i) => i.title).join('; ')}`
       : '';
+  const human = renderHuman(
+    humanItems(cycles, status, leftover),
+    status,
+    reason,
+  );
   const head = `# Revisão
 
 ## Resumo
-- **Veredito**: ${status === 'approved' ? 'aprovado' : 'escalado ao humano'}
+- **Veredito**: ${status === 'approved' ? 'aprovado' : '🔴 escalado ao humano'}
 - **Ciclos realizados**: ${cycles.length} de ${max}${atLimit}${reason ? `\n- **Motivo da escalada**: ${reason}` : ''}
-`;
+- **Depende de ação humana**: ${human.startsWith(HUMAN_TITLE) ? '🔴 SIM, veja o bloco abaixo' : 'não'}
+
+${human}`;
   const blocks = cycles.map((c) => {
     const sent =
       c.sent.length > 0
@@ -231,6 +275,76 @@ function itemTaskId(item: Item): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * One review document per task (`tarefas/T<n>/review.md`): what the reviewers raised about it,
+ * what the Dev answered, and, in red, what only a person can settle. Items that name no task go
+ * to the batch's only task, or to `geral`.
+ */
+function renderTaskReviews(
+  cycles: Cycle[],
+  status: 'approved' | 'escalated',
+  reason: string | undefined,
+  leftover: Item[],
+  only: Task | undefined,
+): Map<number | 'geral', string> {
+  const idOf = (i: Item): number | 'geral' =>
+    itemTaskId(i) ?? only?.id ?? 'geral';
+  type Entry = { kind: string; item: Item; cycle: number; answer?: DevAnswer };
+  const byTask = new Map<number | 'geral', Entry[]>();
+  const add = (e: Entry) =>
+    byTask.set(idOf(e.item), [...(byTask.get(idOf(e.item)) ?? []), e]);
+  for (const c of cycles) {
+    c.sent.forEach((item, n) =>
+      add({
+        kind: item.bucket === 'act_on' ? 'agir' : 'considerar',
+        item,
+        cycle: c.number,
+        ...(c.answers[n] ? { answer: c.answers[n] } : {}),
+      }),
+    );
+    for (const item of c.noted) add({ kind: 'anotado', item, cycle: c.number });
+    for (const item of c.dismissed)
+      add({ kind: 'descartado', item, cycle: c.number });
+  }
+  const humanByTask = new Map<number | 'geral', Item[]>();
+  for (const item of humanItems(cycles, status, leftover))
+    humanByTask.set(idOf(item), [...(humanByTask.get(idOf(item)) ?? []), item]);
+  const docs = new Map<number | 'geral', string>();
+  for (const [id, entries] of byTask) {
+    const models = (e: Entry) =>
+      cycles.find((c) => c.number === e.cycle)?.models;
+    const row = (e: Entry) => {
+      const who = e.item.raised_by
+        .map((l) => models(e)?.[l] || `revisor ${l}`)
+        .join(', ');
+      const answer = e.answer
+        ? `\n   - Dev: ${e.answer.fixed ? 'Corrigido' : 'Não corrigido'}: ${e.answer.text}`
+        : '';
+      return `- (ciclo ${e.cycle}, ${e.kind}${who ? `, ${who}` : ''}) ${e.item.title}: ${e.item.description}${answer}`;
+    };
+    const section = (title: string, kinds: string[]) => {
+      const rows = entries.filter((e) => kinds.includes(e.kind)).map(row);
+      return `## ${title}\n${rows.length > 0 ? rows.join('\n') : '- nada'}\n`;
+    };
+    const human = humanByTask.get(id) ?? [];
+    docs.set(
+      id,
+      `# Revisão ${id === 'geral' ? 'geral' : `da T${id}`}
+
+${
+  human.length > 0
+    ? renderHuman(human, status, reason, '## 🔴 DEPENDE DE AÇÃO HUMANA')
+    : '## ✅ Nada desta task depende de ação humana\n'
+}
+${section('Pedidos de correção e resposta do Dev', ['agir', 'considerar'])}
+${section('Anotados (não voltam ao Dev)', ['anotado'])}
+${section('Descartados', ['descartado'])}`,
+    );
+  }
+  // A task with no finding at all still gets its document
+  return docs;
+}
+
 export type ReviewOptions = {
   /** Commit the diff is taken against. Default `HEAD`: the batch is still uncommitted. */
   base?: string;
@@ -253,7 +367,7 @@ export async function reviewBatch(
   options: ReviewOptions = {},
 ): Promise<{ cycles: number; reviewPath: string; leftover: Item[] }> {
   const max = ctx.config.max_review_cycles;
-  const reviewPath = join(ctx.run.dir, `review-batch-${batch.index}.md`);
+  const reviewPath = join(ctx.run.dir, `review-lote-${batch.index}.md`);
   const skill = await loadSkill('review', deps.skillsDir);
   const reviewerTemplate = (
     await readReference('review', 'reviewer-prompt', deps.skillsDir)
@@ -277,6 +391,13 @@ export async function reviewBatch(
   } catch {
     // no valid spec: the task text is the intent
   }
+  // A batch of its own is reviewed against its own tasks: the later tasks of the plan stay out of it
+  if (batch.total > 1) {
+    const own = batch.tasks
+      .map((t) => inputs.blocks.get(t.id) ?? `## T${t.id}: ${t.title}`)
+      .join('\n\n');
+    intent = `${intent}\n\nThis diff implements only the tasks below, which are part of a longer plan. Review only them: do not report what other tasks of the plan will do later.\n\n${own}`;
+  }
   const lessons = inputs.lessons?.trim() ? inputs.lessons : '(none yet)';
 
   const reviewerConfigs =
@@ -297,6 +418,31 @@ export async function reviewBatch(
   });
 
   const cycles: Cycle[] = [];
+  /** Saves the batch report and, beside it, one review document per task. */
+  const persist = async (
+    status: 'approved' | 'escalated',
+    reason?: string,
+    leftover: Item[] = [],
+  ) => {
+    await saveArtifact(
+      reviewPath,
+      renderReview(cycles, status, max, reason, leftover),
+      () => undefined,
+    );
+    const docs = renderTaskReviews(
+      cycles,
+      status,
+      reason,
+      leftover,
+      batch.tasks.length === 1 ? batch.tasks[0] : undefined,
+    );
+    for (const [id, text] of docs)
+      await saveArtifact(
+        taskDocPath(ctx.run.dir, id, 'review.md'),
+        text,
+        () => undefined,
+      );
+  };
   let previous: { sent: SentItem[]; answers: DevAnswer[] } | null = null;
 
   for (let number = 1; number <= max; number++) {
@@ -415,11 +561,7 @@ export async function reviewBatch(
     cycles.push(cycle);
 
     if (computed === 'approved') {
-      await saveArtifact(
-        reviewPath,
-        renderReview(cycles, 'approved', max),
-        () => undefined,
-      );
+      await persist('approved');
       return { cycles: number, reviewPath, leftover: [] };
     }
 
@@ -434,11 +576,7 @@ export async function reviewBatch(
       .map((p) => previous?.sent[p.ref - 1])
       .filter((i): i is SentItem => i !== undefined && i.bucket === 'act_on');
     const escalate = async (reason: string): Promise<never> => {
-      await saveArtifact(
-        reviewPath,
-        renderReview(cycles, 'escalated', max, reason),
-        () => undefined,
-      );
+      await persist('escalated', reason);
       throw new ReviewEscalation(
         `revisão escalada ao humano: ${reason}. Veja ${reviewPath}.`,
         reviewPath,
@@ -453,11 +591,7 @@ export async function reviewBatch(
       // At the limit, only `consider` items left means no real blocker: the batch is
       // approved and the leftovers are noted. An open `act_on` still goes to the human.
       if (verdict.act_on.length === 0) {
-        await saveArtifact(
-          reviewPath,
-          renderReview(cycles, 'approved', max, undefined, sent),
-          () => undefined,
-        );
+        await persist('approved', undefined, sent);
         return { cycles: number, reviewPath, leftover: sent };
       }
       await escalate(
